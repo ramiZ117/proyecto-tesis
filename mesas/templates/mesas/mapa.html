@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Mapa de mesas{% endblock %}
+{% block heading %}Mapa de mesas{% endblock %}
+{% block subtitle %}Se actualiza solo cada 5 segundos{% endblock %}
+{% block top_actions %}
+  <div class="leyenda">
+    <span><i class="dot dis"></i>Disponible</span>
+    <span><i class="dot ocu"></i>Ocupada</span>
+    <span><i class="dot fac"></i>Por facturar</span>
+    <span><i class="dot lim"></i>Por limpiar</span>
+  </div>
+{% endblock %}
+{% block content %}
+<div id="mapa" data-refresco="{% url 'mesas:mapa_parcial' %}">{% include "mesas/_mapa_grid.html" %}</div>
+{% endblock %}

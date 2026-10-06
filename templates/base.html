@@ -1,0 +1,173 @@
+{% load static %}
+{% if not parcial %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% block extra_head %}{% endblock %}
+  <title>{% block title %}Restó Tesis{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h1 class="brand-side">Restó Tesis</h1>
+      <div class="user-chip">{{ request.user.username }}{% if es_admin %} · Administrador{% endif %}</div>
+      <nav class="nav">
+        <a href="{% url 'inicio' %}">Inicio</a>
+        {% if es_mesero %}<a href="{% url 'mesas:mapa' %}">Mesas</a>{% endif %}
+        {% if es_cocinero %}<a href="{% url 'cocina:kds' %}">Cocina</a>{% endif %}
+        {% if es_cajero %}
+          <a href="{% url 'caja:cuentas' %}">Caja</a>
+          <a href="{% url 'caja:tasa' %}">Tasa de cambio</a>
+          <a href="{% url 'caja:cierre' %}">Cierre de caja</a>
+          <a href="{% url 'caja:reporte' %}">Reporte del día</a>
+          <a href="{% url 'inventario:stock' %}">Inventario{% if insumos_criticos %} <span class="pill pill-crit" id="aviso-stock">{{ insumos_criticos|length }}</span>{% endif %}</a>
+        {% endif %}
+        {% if es_admin %}
+          <a href="{% url 'usuarios' %}">Usuarios</a>
+          <a href="{% url 'admin:index' %}">Administración</a>
+        {% endif %}
+      </nav>
+      <form method="post" action="{% url 'logout' %}">
+        {% csrf_token %}
+        <button class="logout" type="submit">Salir</button>
+      </form>
+    </aside>
+    <main class="content" id="pagina">
+{% else %}
+<main id="pagina-parcial">
+{% endif %}
+      <header class="topbar">
+        <div>
+          <h1>{% block heading %}Panel{% endblock %}</h1>
+          <p class="muted">{% block subtitle %}Operación del restaurante{% endblock %}</p>
+        </div>
+        {% block top_actions %}{% endblock %}
+      </header>
+      {% if insumos_criticos %}
+        <div class="alerta-stock" role="alert">
+          <strong>Stock crítico:</strong> {{ insumos_criticos|join:", " }}.
+          {% if es_cajero %}<a href="{% url 'inventario:stock' %}">Ver inventario y reponer</a>{% endif %}
+        </div>
+      {% endif %}
+      {% if messages %}
+        <ul class="flash">
+          {% for message in messages %}
+            <li class="{% if message.tags == 'success' %}ok{% elif message.tags == 'error' %}err{% elif message.tags == 'warning' %}warn{% endif %}">{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% block content %}{% endblock %}
+{% if not parcial %}
+    </main>
+  </div>
+  <script>
+    (function () {
+      var vigias = {};
+
+      function vigilar() {
+        document.querySelectorAll("[data-refresco]").forEach(function (nodo) {
+          var id = nodo.id;
+          var url = nodo.getAttribute("data-refresco");
+          if (!id || !url || vigias[id]) return;
+          vigias[id] = setInterval(function () {
+            var contenedor = document.getElementById(id);
+            if (!contenedor) return;
+            fetch(url, { credentials: "same-origin" })
+              .then(function (r) { return r.ok ? r.text() : null; })
+              .then(function (html) {
+                if (html === null) return;
+                var actual = document.getElementById(id);
+                if (!actual) return;
+                if (actual.getAttribute("data-ultimo") === null) {
+                  actual.setAttribute("data-ultimo", html);
+                  return;
+                }
+                if (actual.getAttribute("data-ultimo") !== html) {
+                  actual.innerHTML = html;
+                  actual.setAttribute("data-ultimo", html);
+                }
+              })
+              .catch(function () {});
+          }, 5000);
+        });
+      }
+
+      function aplicar(html, urlFinal, rutaAnterior, scrollY) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var nuevo = doc.getElementById("pagina-parcial");
+        var pagina = document.getElementById("pagina");
+        if (!nuevo || !pagina) {
+          location.assign(urlFinal);
+          return;
+        }
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        pagina.innerHTML = nuevo.innerHTML;
+        var destino = new URL(urlFinal, location.origin);
+        var mostrada = destino.pathname + destino.search + destino.hash;
+        var misma = destino.pathname === rutaAnterior;
+        if (misma) history.replaceState({}, "", mostrada);
+        else history.pushState({}, "", mostrada);
+        var y = misma ? scrollY : 0;
+        var hasta = Date.now() + (misma ? 500 : 0);
+        (function mantener() {
+          if (Math.abs((window.scrollY || 0) - y) > 1) window.scrollTo(0, y);
+          if (Date.now() < hasta) requestAnimationFrame(mantener);
+        })();
+        vigilar();
+      }
+
+      document.addEventListener("submit", function (evento) {
+        var form = evento.target;
+        var pagina = document.getElementById("pagina");
+        if (!pagina || !pagina.contains(form) || evento.defaultPrevented) return;
+        evento.preventDefault();
+        var metodo = (form.getAttribute("method") || "get").toLowerCase();
+        var botones = form.querySelectorAll("button, input[type=submit]");
+        botones.forEach(function (b) { b.disabled = true; });
+        var opciones = { credentials: "same-origin", headers: { "X-Partial": "1" } };
+        var direccion = form.getAttribute("action") || location.pathname;
+        if (metodo === "post") {
+          opciones.method = "POST";
+          opciones.body = new FormData(form);
+        } else {
+          direccion = direccion.split("#")[0];
+          var params = new URLSearchParams(new FormData(form));
+          direccion += (direccion.indexOf("?") >= 0 ? "&" : "?") + params.toString();
+        }
+        var rutaAnterior = location.pathname;
+        var scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+        fetch(direccion, opciones)
+          .then(function (respuesta) {
+            if (respuesta.status === 204) {
+              var siguiente = respuesta.headers.get("X-Next");
+              if (!siguiente) throw new Error("sin destino");
+              return fetch(siguiente, { credentials: "same-origin", headers: { "X-Partial": "1" } })
+                .then(function (paginaResp) { return { respuesta: paginaResp, url: siguiente }; });
+            }
+            return { respuesta: respuesta, url: respuesta.url || direccion };
+          })
+          .then(function (resultado) {
+            if (!resultado.respuesta.ok) {
+              location.assign(resultado.url);
+              return;
+            }
+            return resultado.respuesta.text().then(function (html) {
+              aplicar(html, resultado.url, rutaAnterior, scrollY);
+            });
+          })
+          .catch(function () {
+            botones.forEach(function (b) { b.disabled = false; });
+          });
+      });
+
+      vigilar();
+    })();
+  </script>
+</body>
+</html>
+{% else %}
+</main>
+{% endif %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Cierre de caja{% endblock %}
+{% block heading %}Cierre de caja{% endblock %}
+{% block subtitle %}Cobros pendientes de cerrar{% if ultimo %} desde {{ ultimo.hasta|date:"d/m/Y H:i" }}{% endif %}{% endblock %}
+{% block top_actions %}
+  <div class="stack">
+    <a class="btn secondary" href="{% url 'caja:reporte' %}">Reporte del día</a>
+    <a class="btn secondary" href="{% url 'caja:historial' %}">Historial de cierres</a>
+  </div>
+{% endblock %}
+{% block content %}
+<section class="card">
+  {% if facturas_abiertas %}
+    <p class="obs">Tienes {{ facturas_abiertas }} factura(s) abierta(s) sin cobrar completa; no entran al cierre hasta cobrarse.</p>
+  {% endif %}
+  {% include "caja/_desglose.html" %}
+  <form method="post" action="{% url 'caja:generar_cierre' %}" class="no-print">
+    {% csrf_token %}
+    <button class="btn" type="submit">Generar cierre</button>
+  </form>
+</section>
+{% endblock %}

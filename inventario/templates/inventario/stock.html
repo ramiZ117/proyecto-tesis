@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Inventario{% endblock %}
+{% block heading %}Inventario{% endblock %}
+{% block subtitle %}Stock, reposición y recetas del menú{% endblock %}
+{% block content %}
+<section class="split">
+  <div class="card">
+    <h2>Insumos {% if criticos %}<span class="pill pill-crit">{{ criticos }} en nivel crítico</span>{% endif %}</h2>
+    <table>
+      <thead><tr><th>Insumo</th><th>Grupo</th><th>Stock</th><th>Comprometido</th><th>Disponible</th><th>Mínimo</th></tr></thead>
+      <tbody>
+        {% for i in insumos %}
+          <tr{% if i.critico %} class="fila-critica"{% endif %}>
+            <td>{{ i.nombre }}</td>
+            <td>{{ i.get_grupo_display }}</td>
+            <td>{{ i.stock_actual }} {{ i.get_unidad_display }}</td>
+            <td>{{ i.comprometido }}</td>
+            <td>{{ i.disponible }}{% if i.critico %} · <strong>CRÍTICO</strong>{% endif %}</td>
+            <td>{{ i.stock_minimo }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted">El stock baja al cobrar la cuenta. "Comprometido" son los platillos ya pedidos que aún no se cobran.</p>
+
+    <h3>Registrar entrada (reposición)</h3>
+    <form method="post" action="{% url 'inventario:entrada' %}">
+      {% csrf_token %}
+      <label for="insumo_id">Insumo</label>
+      <select id="insumo_id" name="insumo_id" required>
+        {% for i in insumos %}<option value="{{ i.pk }}">{{ i.nombre }} ({{ i.get_unidad_display }})</option>{% endfor %}
+      </select>
+      <label for="cantidad">Cantidad recibida</label>
+      <input id="cantidad" name="cantidad" type="number" step="0.001" min="0.001" required>
+      <label for="nota">Nota (proveedor, factura...)</label>
+      <input id="nota" name="nota" maxlength="200">
+      <p><button class="btn" type="submit">Registrar entrada</button></p>
+    </form>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Menú y recetas</h2>
+      {% for p in productos %}
+        <p>
+          <strong>{{ p.nombre }}</strong> · USD {{ p.precio_usd }} · Bs. {{ p.precio_local|intcomma }}
+          {% if p.porciones is not None %}
+            {% if p.porciones == 0 %}<span class="pill pill-crit">Agotado</span>
+            {% else %}<span class="muted">· {{ p.porciones }} porciones</span>{% endif %}
+          {% endif %}
+        </p>
+        <p class="obs">
+          {% for r in p.recetas.all %}
+            {{ r.cantidad }} {{ r.insumo.get_unidad_display }} de {{ r.insumo.nombre }}{% if not forloop.last %} · {% endif %}
+          {% empty %}
+            Sin receta cargada.
+          {% endfor %}
+        </p>
+      {% endfor %}
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2>Últimos movimientos</h2>
+      <table>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Insumo</th><th>Cant.</th><th>Stock</th></tr></thead>
+        <tbody>
+          {% for m in movimientos %}
+            <tr>
+              <td>{{ m.creado_en|date:"d/m H:i" }}</td>
+              <td>{{ m.get_tipo_display }}</td>
+              <td>{{ m.insumo.nombre }}</td>
+              <td>{{ m.cantidad }}</td>
+              <td>{{ m.stock_resultante }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5">Sin movimientos todavía.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

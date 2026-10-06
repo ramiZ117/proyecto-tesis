@@ -1,0 +1,46 @@
+{% load humanize %}
+<h3>Cobros por método y moneda</h3>
+<table>
+  <thead>
+    <tr><th>Método</th><th>Pagos</th><th>Recibido</th><th>Aplicado (Bs.)</th><th>Vuelto (Bs.)</th><th>Devuelto</th></tr>
+  </thead>
+  <tbody>
+    {% for l in datos.lineas %}
+      <tr>
+        <td>{{ l.metodo_label }}</td>
+        <td>{{ l.cantidad }}</td>
+        <td>{{ l.recibido|intcomma }} {% if l.moneda == "USD" %}USD{% else %}Bs.{% endif %}</td>
+        <td>{{ l.aplicado_local|intcomma }}</td>
+        <td>{{ l.vuelto_local|intcomma }}</td>
+        <td>{% if l.devuelto_local %}−{{ l.devuelto|intcomma }} {% if l.moneda == "USD" %}USD{% else %}Bs.{% endif %}{% else %}—{% endif %}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="6">Sin cobros en este período.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="totals">Cobrado (neto): Bs. {{ datos.total_local|intcomma }} · USD {{ datos.total_usd|intcomma }}</p>
+<p>
+  Efectivo neto en caja: <strong>Bs. {{ datos.efectivo_bs_neto|intcomma }}</strong>
+  · Divisas en caja: <strong>USD {{ datos.divisas_usd|intcomma }}</strong>
+  · Vuelto entregado: Bs. {{ datos.vuelto_local|intcomma }}
+  {% if datos.cantidad_devoluciones %}· Devoluciones: {{ datos.cantidad_devoluciones }} (Bs. {{ datos.devuelto_local|intcomma }}){% endif %}
+</p>
+<p class="muted">Facturas cobradas: {{ datos.cantidad_facturas }} · Anuladas: {{ datos.facturas_anuladas }}</p>
+<table>
+  <thead><tr><th>Factura</th><th>Mesa</th><th>Cajero</th><th>Total Bs.</th><th>Total USD</th><th>Estado</th></tr></thead>
+  <tbody>
+    {% for f in datos.facturas %}
+      <tr>
+        <td><a href="{% url 'caja:factura' f.pk %}">{{ f.numero }}</a></td>
+        <td>{{ f.pedido.mesa.numero }}</td>
+        <td>{{ f.cajero.username }}</td>
+        <td>{{ f.total_local|intcomma }}</td>
+        <td>{{ f.total_usd|intcomma }}</td>
+        <td>{% if f.estado == "ANU" %}Devuelta{% else %}Cobrada{% endif %}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="6">Sin facturas cobradas en este período.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Historial de cierres{% endblock %}
+{% block heading %}Historial de cierres{% endblock %}
+{% block subtitle %}{% if es_admin %}Todos los cajeros{% else %}Tus cierres{% endif %}{% endblock %}
+{% block content %}
+<section class="card">
+  <table>
+    <thead><tr><th>Fecha</th><th>Cajero</th><th>Facturas</th><th>Total Bs.</th><th>Total USD</th><th></th></tr></thead>
+    <tbody>
+      {% for c in cierres %}
+        <tr>
+          <td>{{ c.hasta|date:"d/m/Y H:i" }}</td>
+          <td>{{ c.cajero.username }}</td>
+          <td>{{ c.cantidad_facturas }}</td>
+          <td>{{ c.total_local|intcomma }}</td>
+          <td>{{ c.total_usd|intcomma }}</td>
+          <td><a href="{% url 'caja:cierre_detalle' c.pk %}">Ver</a> · <a href="{% url 'caja:cierre_csv' c.pk %}">CSV</a></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6">Todavía no hay cierres.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

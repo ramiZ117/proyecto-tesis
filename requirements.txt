@@ -1,0 +1,3 @@
+Django>=5.1,<5.3
+# Solo si usas PostgreSQL (DB_ENGINE=postgresql):
+# psycopg[binary]>=3.2

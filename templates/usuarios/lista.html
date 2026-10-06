@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Usuarios{% endblock %}
+{% block heading %}Usuarios{% endblock %}
+{% block subtitle %}Administradores, cajeros, mesoneros y cocineros{% endblock %}
+{% block top_actions %}<a class="btn" href="{% url 'usuario_nuevo' %}">Nuevo usuario</a>{% endblock %}
+{% block content %}
+<section class="card">
+  <table>
+    <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for fila in usuarios %}
+        <tr>
+          <td>{{ fila.usuario.username }}</td>
+          <td>{{ fila.usuario.first_name }}</td>
+          <td>{{ fila.rol }}</td>
+          <td>{% if fila.usuario.is_active %}Activo{% else %}Inactivo{% endif %}</td>
+          <td class="stack">
+            <a href="{% url 'usuario_editar' fila.usuario.pk %}">Editar</a>
+            {% if fila.usuario.pk != request.user.pk %}
+              <form method="post" action="{% url 'usuario_alternar' fila.usuario.pk %}">
+                {% csrf_token %}
+                <button class="ghost" type="submit">{% if fila.usuario.is_active %}Desactivar{% else %}Activar{% endif %}</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

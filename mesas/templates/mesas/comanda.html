@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Comanda mesa {{ pedido.mesa.numero }}{% endblock %}
+{% block heading %}Mesa {{ pedido.mesa.numero }}{% endblock %}
+{% block subtitle %}Pedido #{{ pedido.pk }} · {{ pedido.get_estado_display }} · Mesero {{ pedido.mesero }}{% endblock %}
+{% block content %}
+{% if facturado %}
+  <p class="flash"><span class="ok" style="display:block;padding:10px 14px;border-radius:10px">
+    La cuenta ya fue facturada ({{ facturado.numero }}). El pedido no admite cambios.
+  </span></p>
+{% endif %}
+<div class="split">
+  <section class="card">
+    <h2>Menú</h2>
+    {% for categoria in categorias %}
+      <h3>{{ categoria.nombre }}</h3>
+      <div class="menu-grid">
+        {% for producto in categoria.productos.all %}
+          {% if producto.disponible %}
+          <form class="menu-item card{% if producto.agotado %} agotado{% endif %}" method="post" action="{% url 'mesas:agregar' pedido.pk %}">
+            {% csrf_token %}
+            <strong>{{ producto.nombre }}</strong>
+            <span class="price">USD {{ producto.precio_usd }} · Bs. {{ producto.precio_bs|intcomma }}</span>
+            {% if producto.agotado %}
+              <span class="pill pill-crit">Agotado</span>
+            {% else %}
+              {% if producto.porciones is not None and producto.porciones < 5 %}
+                <span class="obs">Quedan {{ producto.porciones }}</span>
+              {% endif %}
+              <input type="hidden" name="producto_id" value="{{ producto.pk }}">
+              <label>Cantidad</label>
+              <input type="number" name="cantidad" value="1" min="1"{% if producto.porciones is not None %} max="{{ producto.porciones }}"{% endif %}>
+              <label>Observaciones</label>
+              <input type="text" name="observaciones" maxlength="250" placeholder="Sin cebolla, término medio...">
+              <button class="btn" type="submit"{% if facturado %} disabled{% endif %}>Agregar</button>
+            {% endif %}
+          </form>
+          {% endif %}
+        {% endfor %}
+      </div>
+    {% endfor %}
+  </section>
+  <section class="card">
+    <h2>Comanda</h2>
+    <table>
+      <thead>
+        <tr><th>Platillo</th><th>Cant.</th><th>Estado</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for d in detalles %}
+          <tr>
+            <td>
+              {{ d.producto.nombre }}
+              {% if d.observaciones %}<div class="obs">{{ d.observaciones }}</div>{% endif %}
+              <div class="obs">Bs. {{ d.subtotal|intcomma }}</div>
+            </td>
+            <td>{{ d.cantidad }}</td>
+            <td>{% if not d.enviado %}<strong>Sin enviar</strong>{% else %}{{ d.get_estado_display }}{% endif %}</td>
+            <td>
+              {% if d.estado == "PEN" and not facturado %}
+                <form method="post" action="{% url 'mesas:quitar' d.pk %}">
+                  {% csrf_token %}<button class="ghost" type="submit">Quitar</button>
+                </form>
+              {% elif d.estado == "LIS" %}
+                <form method="post" action="{% url 'mesas:entregar' d.pk %}">
+                  {% csrf_token %}<button class="btn ok" type="submit">Entregar</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4">Todavía no hay platillos.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="totals">Subtotal: Bs. {{ pedido.subtotal|intcomma }}</p>
+    <div class="stack">
+      <form method="post" action="{% url 'mesas:enviar' pedido.pk %}">
+        {% csrf_token %}
+        <button class="btn" type="submit"{% if not hay_sin_enviar or facturado %} disabled{% endif %}>Enviar a cocina</button>
+      </form>
+      <form method="post" action="{% url 'mesas:cuenta' pedido.pk %}">
+        {% csrf_token %}
+        <button class="btn warn" type="submit">Solicitar cuenta</button>
+      </form>
+      <form method="post" action="{% url 'mesas:anular' pedido.pk %}" onsubmit="return confirm('¿Anular este pedido y liberar la mesa?');">
+        {% csrf_token %}
+        <button class="ghost" type="submit">Anular pedido</button>
+      </form>
+      <a class="btn secondary" href="{% url 'mesas:mapa' %}">Volver al mapa</a>
+    </div>
+  </section>
+</div>
+{% endblock %}

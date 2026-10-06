@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% load humanize l10n %}
+{% block title %}Factura {{ factura.numero }}{% endblock %}
+{% block heading %}Factura {{ factura.numero }}{% endblock %}
+{% block subtitle %}Mesa {{ factura.pedido.mesa.numero }} · {{ factura.get_estado_display }}{% endblock %}
+{% block content %}
+<section class="card comp">
+  <p>Cajero: {{ factura.cajero }} · {{ factura.emitida_en|date:"d/m/Y H:i" }}</p>
+  <p>Tasa aplicada: 1 USD = {{ factura.tasa_cambio }} Bs.</p>
+  {% if factura.estado == "ANU" %}
+    <p><strong>ANULADA</strong> el {{ factura.anulada_en|date:"d/m/Y H:i" }} — {{ factura.motivo_anulacion }}</p>
+  {% endif %}
+  <table>
+    <thead><tr><th>Platillo</th><th>Cant.</th><th>Importe</th></tr></thead>
+    <tbody>
+      {% for d in factura.pedido.detalles.all %}
+        {% if d.estado != "ANU" %}
+          <tr>
+            <td>{{ d.producto.nombre }}{% if d.observaciones %}<div class="obs">{{ d.observaciones }}</div>{% endif %}</td>
+            <td>{{ d.cantidad }}</td>
+            <td>Bs. {{ d.subtotal|intcomma }}</td>
+          </tr>
+        {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="totals">Total Bs. {{ factura.total_local|intcomma }} · USD {{ factura.total_usd|intcomma }}</p>
+  <p>Pagado: Bs. {{ factura.total_pagado_local|intcomma }} · Saldo: Bs. {{ saldo|intcomma }} (USD {{ saldo_usd|intcomma }})</p>
+
+  {% if factura.pagos.all %}
+    <h3>Pagos</h3>
+    <table>
+      <thead><tr><th>Método</th><th>Recibido</th><th>Aplicado Bs.</th><th>Vuelto Bs.</th><th>Referencia / pagador</th></tr></thead>
+      <tbody>
+        {% for p in factura.pagos.all %}
+          <tr>
+            <td>{{ p.get_metodo_display }}</td>
+            <td>{{ p.monto_recibido|intcomma }} {% if p.moneda == "USD" %}USD{% else %}Bs.{% endif %}</td>
+            <td>{{ p.monto_local|intcomma }}</td>
+            <td>{{ p.vuelto_local|intcomma }}</td>
+            <td>{{ p.referencia }}{% if p.referencia and p.pagador %} · {% endif %}{{ p.pagador }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% if factura.estado == "ABI" %}
+    <div class="no-print">
+      <form method="post" action="{% url 'caja:pago' factura.pk %}" id="pago">
+        {% csrf_token %}
+        <h3>Registrar pago</h3>
+        <p class="muted">Cobra el total de la mesa. Si cada quien paga lo suyo, abre «Dividir la cuenta».</p>
+        <label for="metodo">Método</label>
+        <select id="metodo" name="metodo">
+          <option value="EFE">Efectivo (Bs.)</option>
+          <option value="PMO">Pago móvil (Bs.)</option>
+          <option value="DIV">Divisa (USD en efectivo)</option>
+          <option value="TAR">Tarjeta (Bs.)</option>
+        </select>
+        <label for="monto_recibido">Monto recibido (Bs., o USD si es divisa)</label>
+        <input id="monto_recibido" name="monto_recibido" type="number" step="0.01" min="0.01" required{% if prefill_monto %} value="{{ prefill_monto|unlocalize }}"{% endif %}>
+        <label for="referencia">Referencia / voucher (obligatorio en pago móvil y tarjeta)</label>
+        <input id="referencia" name="referencia" maxlength="60">
+        {% if mostrar_division %}
+          <label for="pagador">Pagador</label>
+          <input id="pagador" name="pagador" list="comensales" maxlength="80" placeholder="Nombre del comensal"{% if prefill_pagador %} value="{{ prefill_pagador }}"{% endif %}>
+          {% if prefill_pagador %}<p class="muted">Monto sugerido en Bs. Si {{ prefill_pagador }} paga en divisa, ingresa el equivalente en USD indicado en su fila.</p>{% endif %}
+        {% endif %}
+        <p><button class="btn" type="submit">Cobrar</button></p>
+      </form>
+
+      <details id="division" class="opcional"{% if mostrar_division %} open{% endif %}>
+        <summary>Dividir la cuenta (opcional)</summary>
+        <form method="get">
+          <input type="hidden" name="dividir" value="1">
+          <label for="partes">¿Entre cuántas personas, a partes iguales?</label>
+          <input id="partes" name="partes" type="number" min="2" max="30" value="{{ partes|default:'' }}">
+          <p><button class="btn secondary" type="submit">Calcular</button></p>
+        </form>
+        {% if partes %}
+          <p class="totals">{{ partes }} personas: Bs. {{ cuota_local|intcomma }} (USD {{ cuota_usd|intcomma }}) cada una</p>
+        {% endif %}
+
+        <h3>Dividir por platillo</h3>
+        <p class="muted">Solo si hace falta: asigna cada platillo (o parte de él) a un comensal y cobra a cada uno lo suyo.</p>
+      {% if division.libres %}
+        <table>
+          <thead><tr><th>Sin asignar</th><th>Quedan</th><th>Asignar a</th></tr></thead>
+          <tbody>
+            {% for fila in division.libres %}
+              <tr>
+                <td>{{ fila.detalle.producto.nombre }} · Bs. {{ fila.detalle.precio_unitario|intcomma }} c/u</td>
+                <td>{{ fila.restante }}</td>
+                <td>
+                  <form method="post" action="{% url 'caja:asignar' factura.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="detalle_id" value="{{ fila.detalle.pk }}">
+                    <input name="pagador" list="comensales" maxlength="80" placeholder="Nombre" required>
+                    <input name="cantidad" type="number" min="1" max="{{ fila.restante }}" placeholder="Todo" style="width:5em">
+                    <button class="btn secondary" type="submit">Asignar</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="muted">Sin asignar: Bs. {{ division.sin_asignar_local|intcomma }}</p>
+      {% elif division.hay_asignaciones %}
+        <p class="muted">Todos los platillos están asignados.</p>
+      {% endif %}
+      <datalist id="comensales">
+        {% for persona in division.personas %}<option value="{{ persona.nombre }}">{% endfor %}
+      </datalist>
+
+      {% if division.personas %}
+        <table>
+          <thead><tr><th>Comensal</th><th>Consumo</th><th>Total</th><th>Pagado</th><th>Pendiente</th><th></th></tr></thead>
+          <tbody>
+            {% for persona in division.personas %}
+              <tr>
+                <td><strong>{{ persona.nombre }}</strong></td>
+                <td>
+                  {% for a in persona.items %}
+                    <div>
+                      {{ a.cantidad }} × {{ a.detalle.producto.nombre }} (Bs. {{ a.subtotal|intcomma }})
+                      <form method="post" action="{% url 'caja:quitar_asignacion' factura.pk %}" style="display:inline">
+                        {% csrf_token %}<input type="hidden" name="asignacion_id" value="{{ a.pk }}">
+                        <button class="ghost" type="submit" title="Quitar">×</button>
+                      </form>
+                    </div>
+                  {% endfor %}
+                </td>
+                <td>Bs. {{ persona.total_local|intcomma }}<div class="muted">USD {{ persona.total_usd|intcomma }}</div></td>
+                <td>Bs. {{ persona.pagado_local|intcomma }}</td>
+                <td>Bs. {{ persona.pendiente_local|intcomma }}<div class="muted">USD {{ persona.pendiente_usd|intcomma }}</div></td>
+                <td>
+                  {% if persona.pendiente_local > 0 %}
+                    <a class="btn secondary" href="?dividir=1&pagador={{ persona.nombre|urlencode }}#pago">Cobrar</a>
+                  {% else %}<span class="pill">Pagó</span>{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <form method="post" action="{% url 'caja:quitar_asignacion' factura.pk %}" onsubmit="return confirm('¿Quitar todas las asignaciones?');">
+          {% csrf_token %}<button class="ghost" type="submit">Quitar todas las asignaciones</button>
+        </form>
+      {% endif %}
+      </details>
+
+      {% if not factura.pagos.exists %}
+        <form method="post" action="{% url 'caja:anular_factura' factura.pk %}" onsubmit="return confirm('¿Anular esta factura?');">
+          {% csrf_token %}
+          <label for="motivo">Anular factura (motivo)</label>
+          <input id="motivo" name="motivo" maxlength="200" required>
+          <p><button class="ghost" type="submit">Anular factura</button></p>
+        </form>
+      {% elif es_admin %}
+        <form method="post" action="{% url 'caja:anular_factura' factura.pk %}" onsubmit="return confirm('Se anulará la factura y se devolverán todos los pagos. ¿Continuar?');">
+          {% csrf_token %}
+          <label for="motivo">Anular y devolver los pagos (motivo)</label>
+          <input id="motivo" name="motivo" maxlength="200" required>
+          <p><button class="ghost" type="submit">Anular y devolver pagos</button></p>
+        </form>
+      {% else %}
+        <p class="muted">Esta factura ya tiene pagos: solo un administrador puede anularla y devolver el dinero.</p>
+      {% endif %}
+    </div>
+  {% elif factura.estado == "PAG" %}
+    <p class="no-print"><button class="btn secondary" type="button" onclick="window.print()">Imprimir comprobante</button></p>
+    {% if es_admin %}
+      <form method="post" class="no-print" action="{% url 'caja:anular_factura' factura.pk %}" onsubmit="return confirm('Se anulará la venta y se devolverán todos los pagos. ¿Continuar?');">
+        {% csrf_token %}
+        <h3>Devolución</h3>
+        <label for="motivo">Anular esta venta y devolver el dinero (motivo)</label>
+        <input id="motivo" name="motivo" maxlength="200" required>
+        <p class="muted">El inventario ya descontado no se repone (el platillo se preparó).</p>
+        <p><button class="ghost" type="submit">Anular y devolver pagos</button></p>
+      </form>
+    {% endif %}
+  {% endif %}
+
+  {% if devoluciones %}
+    <h3>Devoluciones</h3>
+    <table>
+      <thead><tr><th>Método</th><th>Devuelto</th><th>Equivalente Bs.</th><th>Motivo</th><th>Registró</th></tr></thead>
+      <tbody>
+        {% for d in devoluciones %}
+          <tr>
+            <td>{{ d.get_metodo_display }}{% if d.referencia %} · {{ d.referencia }}{% endif %}</td>
+            <td>{{ d.monto|intcomma }} {% if d.moneda == "USD" %}USD{% else %}Bs.{% endif %}</td>
+            <td>{{ d.monto_local|intcomma }}</td>
+            <td>{{ d.motivo }}</td>
+            <td>{{ d.registrado_por.username }} · {{ d.registrado_en|date:"d/m/Y H:i" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,36 @@
+<section class="kds-grid">
+  {% for pedido in pedidos %}
+    <article class="ticket nivel-{{ pedido.nivel }}">
+      <h3>Mesa {{ pedido.mesa.numero }} · #{{ pedido.pk }}</h3>
+      <p class="muted">
+        Entró {{ pedido.desde|date:"H:i" }}
+        {% if pedido.pendiente_cocina %}
+          · <strong>{{ pedido.espera_min }} min</strong> en espera
+          {% if pedido.nivel == "critico" %}<span class="pill pill-crit">Crítico</span>
+          {% elif pedido.nivel == "demora" %}<span class="pill pill-warn">Demorado</span>{% endif %}
+        {% else %}
+          · todo listo, esperando al mesero
+        {% endif %}
+      </p>
+      {% for d in pedido.items_cocina %}
+        <div class="item">
+          <strong>{{ d.cantidad }} × {{ d.producto.nombre }}</strong>
+          <div>{{ d.get_estado_display }}</div>
+          {% if d.observaciones %}<div class="obs">{{ d.observaciones }}</div>{% endif %}
+          {% if d.estado == "PEN" or d.estado == "PRE" %}
+            <form method="post" action="{% url 'cocina:estado' d.pk %}">
+              {% csrf_token %}
+              {% if d.estado == "PEN" %}
+                <button class="btn warn" name="accion" value="preparar" type="submit">Preparar</button>
+              {% else %}
+                <button class="btn ok" name="accion" value="listo" type="submit">Listo para servir</button>
+              {% endif %}
+            </form>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </article>
+  {% empty %}
+    <p class="card">No hay pedidos en cola.</p>
+  {% endfor %}
+</section>

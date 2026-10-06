@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Cierre {{ cierre.fecha }}{% endblock %}
+{% block heading %}Cierre de caja {{ cierre.fecha|date:"d/m/Y" }}{% endblock %}
+{% block subtitle %}Cajero {{ cierre.cajero.username }} · cerrado {{ cierre.cerrado_en|date:"d/m/Y H:i" }} · tasa 1 USD = {{ cierre.tasa_cambio }} Bs.{% endblock %}
+{% block top_actions %}
+  <div class="stack no-print">
+    <button class="btn secondary" type="button" onclick="window.print()">Imprimir</button>
+    <a class="btn secondary" href="{% url 'caja:cierre_csv' cierre.pk %}">Exportar CSV</a>
+    <a class="btn secondary" href="{% url 'caja:historial' %}">Historial</a>
+  </div>
+{% endblock %}
+{% block content %}
+<section class="card">
+  {% include "caja/_desglose.html" %}
+</section>
+{% endblock %}

@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Cocina KDS{% endblock %}
+{% block heading %}Pantalla de cocina{% endblock %}
+{% block subtitle %}Orden de llegada · se actualiza sola cada 5 segundos{% endblock %}
+{% block content %}
+<div id="kds" data-refresco="{% url 'cocina:kds_parcial' %}">{% include "cocina/_tickets.html" %}</div>
+{% endblock %}

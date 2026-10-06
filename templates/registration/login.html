@@ -1,0 +1,29 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ingresar · Restó Tesis</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body class="auth-body">
+  <section class="auth-card">
+    <h1 class="brand">Restó Tesis</h1>
+    <p class="muted">Sistema transaccional de restaurante</p>
+    <form method="post">
+      {% csrf_token %}
+      {% if form.errors %}
+        <p class="flash"><span class="err" style="display:block;padding:10px 14px;border-radius:10px">
+          {% if form.non_field_errors %}{{ form.non_field_errors.0 }}{% else %}Usuario o contraseña incorrectos.{% endif %}
+        </span></p>
+      {% endif %}
+      <label for="id_username">Usuario</label>
+      <input id="id_username" name="username" required autofocus autocomplete="username">
+      <label for="id_password">Contraseña</label>
+      <input id="id_password" type="password" name="password" required autocomplete="current-password">
+      <p><button class="btn" type="submit">Entrar</button></p>
+    </form>
+  </section>
+</body>
+</html>

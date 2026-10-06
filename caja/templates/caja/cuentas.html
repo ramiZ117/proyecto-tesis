@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Caja{% endblock %}
+{% block heading %}Cuentas abiertas{% endblock %}
+{% block subtitle %}{% if tasa %}Tasa vigente: 1 USD = {{ tasa.valor }} Bs.{% else %}Configura una tasa de cambio{% endif %}{% endblock %}
+{% block content %}
+<section class="cuentas-grid">
+  {% for c in cuentas_abiertas %}
+    <article class="ticket{% if c.solicitada %} nivel-solicitada{% endif %}">
+      <h3>Mesa {{ c.pedido.mesa.numero }}
+        {% if c.solicitada %}<span class="pill pill-info">Cuenta solicitada</span>{% endif %}
+      </h3>
+      <p class="muted">Pedido #{{ c.pedido.pk }} · {{ c.pedido.get_estado_display }} · Mesero {{ c.pedido.mesero.username }}</p>
+      {% for d in c.items %}
+        <div class="item">
+          {{ d.cantidad }} × {{ d.producto.nombre }}
+          <span class="muted">· Bs. {{ d.subtotal|intcomma }}</span>
+          {% if not d.enviado %}<span class="pill pill-warn">Sin enviar</span>{% endif %}
+          {% if d.observaciones %}<div class="obs">{{ d.observaciones }}</div>{% endif %}
+        </div>
+      {% empty %}
+        <p class="obs">Sin platillos.</p>
+      {% endfor %}
+      <p class="totals">Bs. {{ c.subtotal|intcomma }}</p>
+      {% if c.usd %}<p class="muted">≈ USD {{ c.usd|intcomma }}</p>{% endif %}
+      {% if c.factura %}
+        <a class="btn" href="{% url 'caja:factura' c.factura.pk %}">Ver factura {{ c.factura.numero }}</a>
+      {% elif c.items and not c.sin_enviar %}
+        <form method="post" action="{% url 'caja:emitir' c.pedido.pk %}">
+          {% csrf_token %}
+          <button class="btn" type="submit">Emitir factura</button>
+        </form>
+      {% elif c.sin_enviar %}
+        <p class="obs">Hay platillos sin enviar a cocina; no se puede facturar todavía.</p>
+      {% endif %}
+    </article>
+  {% empty %}
+    <p class="card">No hay cuentas abiertas.</p>
+  {% endfor %}
+</section>
+{% endblock %}

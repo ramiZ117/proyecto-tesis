@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Inicio{% endblock %}
+{% block heading %}Módulos de trabajo{% endblock %}
+{% block subtitle %}Elige el área según tu rol{% endblock %}
+{% block content %}
+<section class="grid-home">
+  {% if es_mesero %}
+  <a class="home-card" href="{% url 'mesas:mapa' %}">
+    <h2>Mesas</h2>
+    <p>Mapa del salón, comandas y envío a cocina.</p>
+  </a>
+  {% endif %}
+  {% if es_cocinero %}
+  <a class="home-card" href="{% url 'cocina:kds' %}">
+    <h2>Cocina</h2>
+    <p>Pantalla KDS: pedidos en cola y estados de preparación.</p>
+  </a>
+  {% endif %}
+  {% if es_cajero %}
+  <a class="home-card" href="{% url 'caja:cuentas' %}">
+    <h2>Caja</h2>
+    <p>Cobro bimonetario, facturas y cierre del día.</p>
+  </a>
+  <a class="home-card" href="{% url 'inventario:stock' %}">
+    <h2>Inventario</h2>
+    <p>Stock de insumos, reposición y recetas del menú.</p>
+  </a>
+  {% endif %}
+  {% if es_admin %}
+  <a class="home-card" href="{% url 'usuarios' %}">
+    <h2>Usuarios</h2>
+    <p>Altas, roles, contraseñas y activación de cuentas.</p>
+  </a>
+  <a class="home-card" href="{% url 'caja:reporte' %}">
+    <h2>Reporte del día</h2>
+    <p>Ventas consolidadas de todos los cajeros.</p>
+  </a>
+  {% endif %}
+</section>
+{% endblock %}

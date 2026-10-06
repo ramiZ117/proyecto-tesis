@@ -1,0 +1,23 @@
+{% load humanize %}
+<section class="mesa-grid" style="--cols: {{ columnas }}">
+  {% for mesa in mesas %}
+    <form method="post"
+          action="{% if mesa.estado == 'LIM' %}{% url 'mesas:limpiar' mesa.pk %}{% else %}{% url 'mesas:abrir' mesa.pk %}{% endif %}"
+          {% if usar_posiciones %}style="grid-column: {{ mesa.pos_x|add:1 }}; grid-row: {{ mesa.pos_y|add:1 }}"{% endif %}>
+      {% csrf_token %}
+      <button class="mesa {{ mesa.estado }}" type="submit">
+        <div>
+          <div class="num">Mesa {{ mesa.numero }}</div>
+          <div class="muted">{{ mesa.capacidad }} personas</div>
+          {% if mesa.pedido_info %}
+            <div class="obs">Atiende: {{ mesa.pedido_info.mesero.username }}</div>
+            <div class="obs">Consumo: Bs. {{ mesa.pedido_info.subtotal|intcomma }}</div>
+          {% endif %}
+        </div>
+        <span class="pill">{{ mesa.get_estado_display }}{% if mesa.estado == 'LIM' %} · tocar para liberar{% endif %}</span>
+      </button>
+    </form>
+  {% empty %}
+    <p class="card">No hay mesas. Ejecuta <code>python manage.py seed_restaurante</code>.</p>
+  {% endfor %}
+</section>

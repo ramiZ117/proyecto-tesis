@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ titulo }}{% endblock %}
+{% block heading %}{{ titulo }}{% endblock %}
+{% block subtitle %}Las contraseñas se guardan cifradas{% endblock %}
+{% block content %}
+<section class="card comp">
+  <form method="post">
+    {% csrf_token %}
+    {% for campo in form %}
+      <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
+      {{ campo }}
+      {% for error in campo.errors %}<div class="obs" style="color:#b33b3b">{{ error }}</div>{% endfor %}
+    {% endfor %}
+    {% for error in form.non_field_errors %}<div class="obs" style="color:#b33b3b">{{ error }}</div>{% endfor %}
+    <p class="hint muted">Al editar, deja la contraseña vacía para conservar la actual.</p>
+    <p class="stack">
+      <button class="btn" type="submit">Guardar</button>
+      <a class="btn secondary" href="{% url 'usuarios' %}">Cancelar</a>
+    </p>
+  </form>
+</section>
+{% endblock %}

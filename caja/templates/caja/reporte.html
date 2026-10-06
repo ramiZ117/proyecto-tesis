@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Reporte del día{% endblock %}
+{% block heading %}Reporte de ventas del día{% endblock %}
+{% block subtitle %}{{ fecha|date:"d/m/Y" }} · {% if consolidado %}todos los cajeros{% else %}solo tus cobros{% endif %}{% endblock %}
+{% block top_actions %}
+  <div class="stack no-print">
+    <form method="get" class="stack">
+      <input type="date" name="fecha" value="{{ fecha|date:'Y-m-d' }}">
+      <button class="btn secondary" type="submit">Ver</button>
+    </form>
+    <button class="btn secondary" type="button" onclick="window.print()">Imprimir</button>
+    <a class="btn secondary" href="?fecha={{ fecha|date:'Y-m-d' }}&formato=csv">Exportar CSV</a>
+  </div>
+{% endblock %}
+{% block content %}
+<section class="card">
+  {% include "caja/_desglose.html" %}
+</section>
+{% endblock %}
