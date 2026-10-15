@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<title>Modelo de dominio</title>
+<style>
+  body { font-family: Georgia, serif; margin: 24px; background: #fff; color: #111; }
+  h1 { font-size: 1.3rem; }
+  .mermaid { background: #fff; }
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, securityLevel: "loose" });
+</script>
+</head>
+<body>
+<h1>Modelo de dominio</h1>
+<p>Para llevarlo al trabajo: Win + Shift + S, recorta el dibujo y en Word pulsa Ctrl + V.</p>
+<pre class="mermaid">
+classDiagram
+    direction TB
+    class Usuario {
+        rol
+        activo
+    }
+    class Mesa {
+        numero
+        estado
+    }
+    class Comanda {
+        estado
+        notas
+    }
+    class DetalleComanda {
+        cantidad
+        precio
+        estado
+    }
+    class Plato {
+        nombre
+        precioUsd
+    }
+    class Receta {
+        cantidad
+    }
+    class Ingrediente {
+        nombre
+        stock
+    }
+    class Factura {
+        numero
+        total
+    }
+    Usuario "1" --> "0..*" Comanda : toma
+    Mesa "1" --> "0..*" Comanda : atiende
+    Comanda "1" *-- "1..*" DetalleComanda : compone
+    DetalleComanda "*" --> "1" Plato : ordena
+    Plato "1" *-- "0..*" Receta : define
+    Receta "*" --> "1" Ingrediente : consume
+    Comanda "1" --> "0..1" Factura : origina
+    Usuario "1" --> "0..*" Factura : emite
+</pre>
+</body>
+</html>
