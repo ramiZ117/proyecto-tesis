@@ -11,3 +11,5 @@ staticfiles/
 .vscode/
 *.sqlite3-wal
 *.sqlite3-shm
+logs/
+respaldos/

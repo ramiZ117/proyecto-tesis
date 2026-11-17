@@ -1,0 +1,7 @@
+# Herramientas de desarrollo y pruebas (no hacen falta en el equipo del restaurante).
+#   pip install -r requirements-dev.txt
+#   python manage.py test                      # incluye las pruebas en navegador
+# Las pruebas en navegador usan Edge o Chrome si están instalados; si no:
+#   python -m playwright install chromium
+-r requirements.txt
+playwright==1.65.2

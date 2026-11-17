@@ -8,7 +8,11 @@ def _es_fragmento(request) -> bool:
 
 
 def parcial(request):
-    return {"parcial": getattr(request, "parcial", False)}
+    from django.conf import settings
+
+    # `version_app` va en los enlaces al CSS y JS: al cambiar de versión, los navegadores
+    # del local descargan los archivos nuevos en vez de usar la copia vieja de su caché.
+    return {"parcial": getattr(request, "parcial", False), "version_app": settings.VERSION_APP}
 
 
 def roles(request):

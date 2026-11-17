@@ -38,13 +38,21 @@ if not SECRET_KEY:
 
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if h.strip()]
 
+VERSION_APP = "2.1.0"
+
+# CSRF: orígenes desde los que se aceptan formularios (p. ej. http://192.168.1.10:8000 en la red del local).
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.environ.get("DJANGO_CSRF_ORIGINS", "").split(",") if o.strip()]
+
 if not DEBUG:
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
-    # HTTPS: actívalo (DJANGO_HTTPS=1) cuando el sitio se sirva detrás de un certificado válido.
+    SESSION_COOKIE_HTTPONLY = True
+    # HTTPS: actívalo (DJANGO_HTTPS=1) solo si el sitio se sirve con un certificado válido.
+    # En la red interna del restaurante se usa HTTP: marcar las cookies como "solo HTTPS"
+    # impediría iniciar sesión, por eso van dentro de esta condición.
     if os.environ.get("DJANGO_HTTPS", "0") == "1":
+        SESSION_COOKIE_SECURE = True
+        CSRF_COOKIE_SECURE = True
         SECURE_SSL_REDIRECT = True
         SECURE_HSTS_SECONDS = 31536000
         SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -58,6 +66,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django.contrib.humanize',
+    'config',  # comandos de operación: servir, respaldar, medir_rendimiento
     'inventario.apps.InventarioConfig',
     'mesas.apps.MesasConfig',
     'cocina.apps.CocinaConfig',
@@ -67,6 +76,8 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'config.middleware.RespuestaParcialMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    # Sirve el CSS, el JS y el logo sin un servidor web aparte (también en producción).
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -141,6 +152,47 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / "static"]
+# `python manage.py collectstatic` reúne aquí los archivos para producción.
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        # En producción los archivos llevan una huella en el nombre (app.3f2a….css) y se
+        # comprimen: el navegador nunca usa una versión vieja. En desarrollo y pruebas, normal.
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        if DEBUG or "test" in sys.argv[1:2]
+        else "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
+# Respaldos automáticos de la base (comando `respaldar`).
+RESPALDOS_DIR = Path(os.environ.get("RESPALDOS_DIR") or BASE_DIR / "respaldos")
+RESPALDOS_CONSERVAR = int(os.environ.get("RESPALDOS_CONSERVAR", "30"))
+
+# Registro de errores: consola y archivo rotativo en logs/el_amir.log (5 archivos de 2 MB).
+LOGS_DIR = BASE_DIR / "logs"
+LOGS_DIR.mkdir(exist_ok=True)
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"simple": {"format": "{asctime} {levelname} {name}: {message}", "style": "{"}},
+    "handlers": {
+        "consola": {"class": "logging.StreamHandler", "formatter": "simple"},
+        "archivo": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": LOGS_DIR / "el_amir.log",
+            "maxBytes": 2 * 1024 * 1024,
+            "backupCount": 5,
+            "encoding": "utf-8",
+            "formatter": "simple",
+        },
+    },
+    "root": {"handlers": ["consola", "archivo"], "level": "WARNING"},
+    "loggers": {
+        "django": {"handlers": ["consola", "archivo"], "level": "WARNING", "propagate": False},
+        "el_amir": {"handlers": ["consola", "archivo"], "level": "INFO", "propagate": False},
+    },
+}
 
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "inicio"

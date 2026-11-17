@@ -76,16 +76,22 @@
     if (!pagina || !pagina.contains(form) || evento.defaultPrevented || form.hasAttribute("data-sin-parcial")) return;
     evento.preventDefault();
     var metodo = (form.getAttribute("method") || "get").toLowerCase();
+    // Los datos se leen ANTES de desactivar los botones: un botón desactivado no se envía, y
+    // botones como los platos de la carta (name="producto_id") o las acciones de cocina
+    // (name="accion") llevan justamente el dato que el servidor necesita.
+    var datos = new FormData(form);
+    var pulsado = evento.submitter;
+    if (pulsado && pulsado.name && !pulsado.disabled) datos.append(pulsado.name, pulsado.value);
     var botones = form.querySelectorAll("button, input[type=submit]");
     botones.forEach(function (b) { b.disabled = true; });
     var opciones = { credentials: "same-origin", headers: { "X-Partial": "1" } };
     var direccion = form.getAttribute("action") || location.pathname;
     if (metodo === "post") {
       opciones.method = "POST";
-      opciones.body = new FormData(form, evento.submitter || undefined);
+      opciones.body = datos;
     } else {
       direccion = direccion.split("#")[0];
-      var params = new URLSearchParams(new FormData(form));
+      var params = new URLSearchParams(datos);
       direccion += (direccion.indexOf("?") >= 0 ? "&" : "?") + params.toString();
     }
     var rutaAnterior = location.pathname;
