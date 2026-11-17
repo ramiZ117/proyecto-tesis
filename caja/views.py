@@ -14,6 +14,7 @@ from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
 from caja.models import CierreCaja, Factura, Pago, TasaCambio
+from config.formato import num
 from config.permisos import GRUPO_CAJA, es_admin, requiere_grupo, texto_validacion
 from mesas.models import DetallePedido, Mesa, Pedido
 
@@ -43,9 +44,8 @@ def _tasa_activa():
     return TasaCambio.objects.filter(activa=True).order_by("-vigente_desde").first()
 
 
-@requiere_grupo(GRUPO_CAJA)
-def cuentas(request):
-    """Consumo consolidado por mesa, con las cuentas solicitadas primero."""
+def _cuentas_abiertas(tasa):
+    """Comandas abiertas (mesas y para llevar) con su consumo; las que piden cuenta van primero."""
     pedidos = (
         Pedido.objects.exclude(estado__in=[Pedido.Estado.CERRADO, Pedido.Estado.ANULADO])
         .select_related("mesa", "mesero")
@@ -54,26 +54,40 @@ def cuentas(request):
                 "detalles",
                 queryset=DetallePedido.objects.exclude(estado=DetallePedido.Estado.ANULADO).select_related("producto"),
                 to_attr="items_cuenta",
-            )
+            ),
+            Prefetch("facturas", queryset=Factura.objects.exclude(estado=Factura.Estado.ANULADA), to_attr="facturas_vigentes"),
         )
     )
-    tasa = _tasa_activa()
     cuentas_abiertas = []
     for pedido in pedidos:
         subtotal = sum((d.subtotal for d in pedido.items_cuenta), Decimal("0.00"))
+        if pedido.mesa_id:
+            solicitada = pedido.mesa.estado == Mesa.Estado.POR_FACTURAR
+        else:
+            solicitada = pedido.estado in {Pedido.Estado.LISTO, Pedido.Estado.ENTREGADO}
         cuentas_abiertas.append(
             {
                 "pedido": pedido,
                 "items": pedido.items_cuenta,
+                "platos": sum(d.cantidad for d in pedido.items_cuenta),
                 "subtotal": subtotal,
                 "usd": tasa.a_usd(subtotal) if tasa else None,
-                "factura": pedido.factura_activa,
-                "solicitada": pedido.mesa.estado == Mesa.Estado.POR_FACTURAR,
+                "factura": pedido.facturas_vigentes[0] if pedido.facturas_vigentes else None,
+                "solicitada": solicitada,
                 "sin_enviar": any(not d.enviado for d in pedido.items_cuenta),
             }
         )
-    cuentas_abiertas.sort(key=lambda c: (not c["solicitada"], c["pedido"].mesa.numero))
-    return render(request, "caja/cuentas.html", {"cuentas_abiertas": cuentas_abiertas, "tasa": tasa})
+    cuentas_abiertas.sort(
+        key=lambda c: (not c["solicitada"], c["pedido"].mesa is None, c["pedido"].mesa.numero if c["pedido"].mesa else c["pedido"].pk)
+    )
+    return cuentas_abiertas
+
+
+@requiere_grupo(GRUPO_CAJA)
+def cuentas(request):
+    """Consumo consolidado por mesa y pedidos para llevar, con las cuentas solicitadas primero."""
+    tasa = _tasa_activa()
+    return render(request, "caja/cuentas.html", {"cuentas_abiertas": _cuentas_abiertas(tasa), "tasa": tasa})
 
 
 @requiere_grupo(GRUPO_CAJA)
@@ -127,6 +141,16 @@ def factura_detalle(request, factura_id):
         )
     else:
         contexto["devoluciones"] = list(factura.devoluciones.select_related("registrado_por"))
+        ultimo = factura.pagos.order_by("-registrado_en", "-pk").first()
+        contexto["ultimo_vuelto"] = ultimo.vuelto_local if ultimo and ultimo.vuelto_local > 0 else None
+    contexto["cola"] = [c for c in _cuentas_abiertas(_tasa_activa()) if c["pedido"].pk != factura.pedido_id][:8]
+    contexto["metodos"] = [
+        (Pago.Metodo.EFECTIVO, "Efectivo", "Bolívares, con vuelto"),
+        (Pago.Metodo.PAGO_MOVIL, "Pago móvil", "Bolívares, con referencia"),
+        (Pago.Metodo.DIVISA, "Divisa", "Dólares en efectivo"),
+        (Pago.Metodo.TARJETA, "Tarjeta", "Punto de venta"),
+    ]
+    contexto["detalles_vigentes"] = [d for d in factura.pedido.detalles.all() if d.estado != DetallePedido.Estado.ANULADO]
     return render(request, "caja/factura.html", contexto)
 
 
@@ -209,10 +233,14 @@ def quitar_asignacion(request, factura_id):
     return _volver_factura(factura.pk, dividir=True)
 
 
+VARIACION_MAXIMA_TASA = Decimal("0.20")
+
+
 @requiere_grupo(GRUPO_CAJA)
 def tasa_cambio(request):
     tasas = TasaCambio.objects.select_related("creada_por")[:20]
-    return render(request, "caja/tasa.html", {"tasas": tasas, "vigente": _tasa_activa()})
+    propuesta = _leer_monto(request.GET.get("confirmar"), decimales=4)
+    return render(request, "caja/tasa.html", {"tasas": tasas, "vigente": _tasa_activa(), "propuesta": propuesta})
 
 
 @requiere_grupo(GRUPO_CAJA)
@@ -222,10 +250,20 @@ def guardar_tasa(request):
     if valor is None:
         messages.error(request, "La tasa debe ser un número mayor a cero.")
         return redirect("caja:tasa")
+    vigente = _tasa_activa()
+    if vigente and not request.POST.get("confirmado"):
+        variacion = abs(valor / vigente.valor - 1)
+        if variacion > VARIACION_MAXIMA_TASA:
+            messages.warning(
+                request,
+                f"La nueva tasa ({num(valor, 2)} Bs) cambia {variacion * 100:.0f}% respecto de la vigente ({num(vigente.valor, 2)} Bs). "
+                "Confírmala si es correcta.",
+            )
+            return redirect(reverse("caja:tasa") + f"?confirmar={valor}")
     with transaction.atomic():
         TasaCambio.objects.filter(activa=True).update(activa=False)
         TasaCambio.objects.create(valor=valor, creada_por=request.user, activa=True)
-    messages.success(request, f"Nueva tasa: 1 USD = {valor} Bs.")
+    messages.success(request, f"Nueva tasa: 1 USD = {num(valor, 2)} Bs.")
     return redirect("caja:tasa")
 
 
@@ -273,14 +311,14 @@ def _cierre_visible(request, cierre_id):
 @requiere_grupo(GRUPO_CAJA)
 def cierre_detalle(request, cierre_id):
     cierre_caja = _cierre_visible(request, cierre_id)
-    datos = CierreCaja.calcular(cierre_caja.cajero, cierre_caja.desde, cierre_caja.hasta)
+    datos = cierre_caja.datos_guardados()
     return render(request, "caja/cierre_detalle.html", {"cierre": cierre_caja, "datos": datos})
 
 
 @requiere_grupo(GRUPO_CAJA)
 def cierre_csv(request, cierre_id):
     cierre_caja = _cierre_visible(request, cierre_id)
-    datos = CierreCaja.calcular(cierre_caja.cajero, cierre_caja.desde, cierre_caja.hasta)
+    datos = cierre_caja.datos_guardados()
     return _respuesta_csv(
         f"cierre-{cierre_caja.fecha}-{cierre_caja.cajero.username}.csv",
         titulo=f"Cierre de caja {cierre_caja.fecha} - cajero {cierre_caja.cajero.username}",
@@ -336,8 +374,8 @@ def _respuesta_csv(nombre: str, titulo: str, datos: dict) -> HttpResponse:
     escritor.writerow(["Factura", "Mesa", "Cajero", "Total (Bs.)", "Total (USD)", "Pagada", "Estado"])
     for f in datos["facturas"]:
         escritor.writerow(
-            [f.numero, f.pedido.mesa.numero, f.cajero.username, f.total_local, f.total_usd,
-             timezone.localtime(f.pagada_en).strftime("%d/%m/%Y %H:%M") if f.pagada_en else "",
-             "Devuelta" if f.estado == Factura.Estado.ANULADA else "Cobrada"]
+            [f["numero"], f["mesa"], f["cajero"], f["total_local"], f["total_usd"],
+             timezone.localtime(f["pagada_en"]).strftime("%d/%m/%Y %H:%M") if f["pagada_en"] else "",
+             "Devuelta" if f["estado"] == Factura.Estado.ANULADA else "Cobrada"]
         )
     return respuesta

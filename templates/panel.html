@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Panel{% endblock %}
+{% block subtitle %}{% now "l j \d\e F" %}{% endblock %}
+{% block heading %}Hola, {{ request.user.first_name|default:request.user.username }}{% endblock %}
+{% block top_actions %}
+  <nav class="segmentos" aria-label="Período">
+    {% for clave, nombre in periodos %}
+      <a href="?periodo={{ clave }}" class="{% if clave == periodo %}activo{% endif %}"{% if clave == periodo %} aria-current="true"{% endif %}>{{ nombre }}</a>
+    {% endfor %}
+  </nav>
+{% endblock %}
+{% block content %}
+<section class="grid-auto" style="--min: 220px; margin-bottom: 16px" aria-label="Indicadores">
+  <article class="kpi oscuro alzar subir d1">
+    <div class="stack" style="justify-content: space-between">
+      <small>Ventas</small>
+      {% if delta is not None %}<span class="delta{% if delta < 0 %} baja{% endif %}">{% if delta >= 0 %}+{% endif %}{{ delta }}% vs. {{ comparacion }}</span>{% endif %}
+    </div>
+    <strong>Bs {{ ventas_local|intcomma }}</strong>
+    <span>${{ ventas_usd|intcomma }} en dólares</span>
+  </article>
+  <article class="kpi alzar subir d2">
+    <small>Facturas cobradas</small>
+    <strong>{{ facturas }}</strong>
+    <span>Ticket promedio <b style="color: var(--tinta)">{% if ticket_usd %}${{ ticket_usd|intcomma }}{% else %}—{% endif %}</b></span>
+  </article>
+  <article class="kpi alzar subir d3">
+    <small>Mesas en servicio</small>
+    <strong>{{ mesas_en_servicio }} <span style="font-size: 18px">de {{ mesas|length }}</span></strong>
+    <div class="mini-mesas" aria-hidden="true">{% for m in mesas %}<span class="{{ m.estado }}" title="Mesa {{ m.numero }}: {{ m.get_estado_display }}"></span>{% endfor %}</div>
+    <span>{{ para_llevar }} pedido{{ para_llevar|pluralize }} para llevar en curso</span>
+  </article>
+  <article class="kpi alzar subir d4">
+    <small>Tiempo medio en cocina</small>
+    <strong>{% if minutos_cocina is not None %}{{ minutos_cocina }} min{% else %}—{% endif %}</strong>
+    <span>Del envío a "listo" · meta: menos de 15 min</span>
+  </article>
+</section>
+
+<section class="grid-auto" style="--min: 360px; margin-bottom: 16px">
+  <article class="card subir d3">
+    <div class="card-cabecera"><h2>{{ titulo_barras }}</h2><span class="obs">En dólares, neto de devoluciones</span></div>
+    <div class="barras" role="img" aria-label="{{ titulo_barras }}: {% for b in barras %}{{ b.etiqueta }} ${{ b.valor }}{% if not forloop.last %}, {% endif %}{% endfor %}">
+      {% for b in barras %}
+        <div class="col" title="{{ b.etiqueta }}: ${{ b.valor|intcomma }}">
+          {% if b.alto %}<span>${{ b.valor|floatformat:0 }}</span>{% endif %}
+          <div class="barra{% if b.pico %} pico{% endif %}{% if not b.alto %} cero{% endif %}" style="height: {% if b.alto %}{{ b.alto }}{% else %}2{% endif %}%; animation-delay: {{ forloop.counter0 }}0ms"></div>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="etiquetas-barras">{% for b in barras %}<span>{{ b.etiqueta }}</span>{% endfor %}</div>
+  </article>
+
+  <article class="card subir d4">
+    <h2>Cobros por método</h2>
+    {% if metodos %}
+      <div class="stack" style="gap: 28px; align-items: center">
+        <div class="dona" role="img" aria-label="{% for m in metodos %}{{ m.nombre }} {{ m.pct }}%{% if not forloop.last %}, {% endif %}{% endfor %}" style="background: {{ gradiente }}">
+          <div><div><strong>${{ ventas_usd|floatformat:0|intcomma }}</strong><span class="obs">cobrado</span></div></div>
+        </div>
+        <ul class="leyenda-dona">
+          {% for m in metodos %}<li><i style="background: {{ m.color }}"></i>{{ m.nombre }}<b>{{ m.pct }}%</b></li>{% endfor %}
+        </ul>
+      </div>
+    {% else %}
+      <p class="vacio">Todavía no hay cobros en este período.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="grid-auto" style="--min: 300px">
+  <article class="card pila subir d5" style="gap: 14px">
+    <h2 style="margin:0">Platos más vendidos</h2>
+    {% for t in top %}
+      <div>
+        <div class="stack" style="justify-content: space-between; font-size: 14px; margin-bottom: 6px"><strong>{{ t.nombre }}</strong><span class="obs">{{ t.cantidad }} vendido{{ t.cantidad|pluralize }}</span></div>
+        <div class="barra-h"><div class="{% if forloop.first %}primero{% endif %}" style="width: {{ t.ancho }}%; animation-delay: {{ forloop.counter }}00ms"></div></div>
+      </div>
+    {% empty %}
+      <p class="vacio">Sin ventas cobradas en este período.</p>
+    {% endfor %}
+  </article>
+
+  <article class="card pila subir d6" style="gap: 12px">
+    <div class="card-cabecera" style="margin:0"><h2>Alertas de inventario</h2><a class="fuerte" href="{% url 'inventario:stock' %}">Ver todo</a></div>
+    {% for i in alertas %}
+      <div class="alerta-item {{ i.nivel }}">
+        <span class="ic">{% if i.critico %}{% include "_icono.html" with nombre="alerta" grosor="2.2" %}{% else %}{% include "_icono.html" with nombre="inventario" grosor="2.2" %}{% endif %}</span>
+        <div style="flex: 1; min-width: 0">
+          <strong style="display:block; font-size: 14px">{{ i.nombre }}</strong>
+          <span class="obs">{{ i.disponible|floatformat:"-3" }} {{ i.abreviatura }} disponibles · {% if i.critico %}mínimo {{ i.stock_minimo|floatformat:"-3" }}{% else %}reponer en {{ i.punto_reposicion|floatformat:"-3" }}{% endif %}</span>
+        </div>
+        <span class="pill {% if i.critico %}crit{% else %}reponer{% endif %}">{% if i.critico %}Crítico{% else %}Reponer{% endif %}</span>
+      </div>
+    {% empty %}
+      <p class="vacio">Todo el inventario está sobre su punto de reposición.</p>
+    {% endfor %}
+  </article>
+
+  <article class="card pila subir d6" style="gap: 14px">
+    <h2 class="stack" style="margin:0"><span class="vivo punto" style="color: var(--verde-600)"></span>Actividad reciente</h2>
+    <ol class="actividad">
+      {% for e in actividad %}
+        <li><i class="tono-{{ e.tono }}"></i><div><strong style="display:block; font-size: 14px">{{ e.texto }}</strong><span class="obs">{{ e.sub }} · hace {{ e.cuando|timesince }}</span></div></li>
+      {% empty %}
+        <li class="obs">Aún no hay movimientos hoy.</li>
+      {% endfor %}
+    </ol>
+  </article>
+</section>
+{% endblock %}

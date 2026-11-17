@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from config.forms import UsuarioForm
+from config.panel import indicadores
 from config.permisos import (
     GRUPO_ADMIN,
     GRUPO_CAJA,
@@ -53,11 +54,17 @@ class LoginSeguro(LoginView):
         return super().form_valid(form)
 
 
+@requiere_admin
+def panel(request):
+    """Panel del administrador: ventas, cobros, platos, cocina, inventario y actividad."""
+    return render(request, "panel.html", indicadores(request.GET.get("periodo", "hoy")))
+
+
 @login_required
 def inicio(request):
     user = request.user
     if es_admin(user):
-        return render(request, "inicio.html")
+        return panel(request)
     grupos = nombres_grupos(user)
     if grupos == {GRUPO_COCINA}:
         return redirect("cocina:kds")

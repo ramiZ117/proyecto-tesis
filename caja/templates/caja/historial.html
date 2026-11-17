@@ -1,26 +1,30 @@
 {% extends "base.html" %}
 {% load humanize %}
 {% block title %}Historial de cierres{% endblock %}
-{% block heading %}Historial de cierres{% endblock %}
 {% block subtitle %}{% if es_admin %}Todos los cajeros{% else %}Tus cierres{% endif %}{% endblock %}
+{% block heading %}Historial de cierres{% endblock %}
+{% block top_actions %}<a class="btn" href="{% url 'caja:cierre' %}">{% include "_icono.html" with nombre="cierre" %}Cierre actual</a>{% endblock %}
 {% block content %}
-<section class="card">
-  <table>
-    <thead><tr><th>Fecha</th><th>Cajero</th><th>Facturas</th><th>Total Bs.</th><th>Total USD</th><th></th></tr></thead>
-    <tbody>
-      {% for c in cierres %}
-        <tr>
-          <td>{{ c.hasta|date:"d/m/Y H:i" }}</td>
-          <td>{{ c.cajero.username }}</td>
-          <td>{{ c.cantidad_facturas }}</td>
-          <td>{{ c.total_local|intcomma }}</td>
-          <td>{{ c.total_usd|intcomma }}</td>
-          <td><a href="{% url 'caja:cierre_detalle' c.pk %}">Ver</a> · <a href="{% url 'caja:cierre_csv' c.pk %}">CSV</a></td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="6">Todavía no hay cierres.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<section class="card subir">
+  <div class="tabla-caja">
+    <table>
+      <thead><tr><th>Fecha</th><th>Cajero</th><th class="der">N.º</th><th class="der">Facturas</th><th class="der">Total Bs</th><th class="der">Total USD</th><th></th></tr></thead>
+      <tbody>
+        {% for c in cierres %}
+          <tr>
+            <td>{{ c.hasta|date:"d/m/Y H:i" }}</td>
+            <td>{{ c.cajero.username }}</td>
+            <td class="der">{{ c.secuencia }}</td>
+            <td class="der">{{ c.cantidad_facturas }}</td>
+            <td class="der num">{{ c.total_local|intcomma }}</td>
+            <td class="der num">{{ c.total_usd|intcomma }}</td>
+            <td class="der"><a href="{% url 'caja:cierre_detalle' c.pk %}">Ver</a> · <a href="{% url 'caja:cierre_csv' c.pk %}">CSV</a></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" class="obs">Todavía no hay cierres.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

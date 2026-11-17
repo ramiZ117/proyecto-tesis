@@ -3,7 +3,8 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 
@@ -64,7 +65,13 @@ class Pedido(models.Model):
         CERRADO = "CER", "Cerrado"
         ANULADO = "ANU", "Anulado"
 
-    mesa = models.ForeignKey(Mesa, on_delete=models.PROTECT, related_name="pedidos")
+    class Tipo(models.TextChoices):
+        MESA = "MES", "En mesa"
+        LLEVAR = "LLE", "Para llevar"
+
+    tipo = models.CharField(max_length=3, choices=Tipo.choices, default=Tipo.MESA)
+    mesa = models.ForeignKey(Mesa, on_delete=models.PROTECT, related_name="pedidos", null=True, blank=True)
+    cliente = models.CharField(max_length=80, blank=True, help_text="Nombre del cliente (pedidos para llevar).")
     mesero = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -85,9 +92,90 @@ class Pedido(models.Model):
             models.Index(fields=["estado", "enviado_cocina_en"]),
             models.Index(fields=["mesa", "estado"]),
         ]
+        constraints = [
+            # Regla de negocio 1: una mesa tiene como máximo una comanda que no esté cerrada ni anulada.
+            models.UniqueConstraint(
+                fields=["mesa"],
+                condition=~Q(estado__in=["CER", "ANU"]),
+                name="uniq_pedido_abierto_por_mesa",
+            ),
+            # Un pedido en mesa tiene mesa; uno para llevar no la tiene.
+            models.CheckConstraint(
+                condition=(Q(tipo="MES") & Q(mesa__isnull=False)) | (Q(tipo="LLE") & Q(mesa__isnull=True)),
+                name="pedido_mesa_segun_tipo",
+            ),
+        ]
 
     def __str__(self) -> str:
-        return f"Pedido #{self.pk} · {self.mesa}"
+        return f"Pedido #{self.pk} · {self.etiqueta}"
+
+    # ---- identificación --------------------------------------------------
+    @property
+    def es_para_llevar(self) -> bool:
+        return self.tipo == self.Tipo.LLEVAR
+
+    @property
+    def codigo(self) -> str:
+        """L-015 para los pedidos para llevar."""
+        return f"L-{self.pk:03d}" if self.pk else "L-nuevo"
+
+    @property
+    def etiqueta(self) -> str:
+        if self.es_para_llevar:
+            return f"Llevar {self.codigo}" + (f" · {self.cliente}" if self.cliente else "")
+        return str(self.mesa) if self.mesa_id else "Sin mesa"
+
+    @classmethod
+    def crear_para_llevar(cls, cliente: str, mesero) -> "Pedido":
+        cliente = " ".join((cliente or "").split())[:80]
+        if not cliente:
+            raise ValidationError("Indica el nombre del cliente del pedido para llevar.")
+        return cls.objects.create(tipo=cls.Tipo.LLEVAR, cliente=cliente, mesero=mesero)
+
+    # ---- apertura --------------------------------------------------------
+    @classmethod
+    def abrir_para(cls, mesa_id: int, mesero) -> tuple["Pedido", bool]:
+        """Abre la comanda de una mesa o devuelve la que ya está abierta.
+
+        Devuelve (pedido, creado). La transacción toma el candado de escritura de la base
+        (SQLite en modo IMMEDIATE), así que dos meseros que confirman a la vez se atienden
+        en fila; la restricción `uniq_pedido_abierto_por_mesa` respalda la regla aunque
+        la operación llegara por otro camino.
+        """
+        with transaction.atomic():
+            mesa = Mesa.objects.select_for_update().get(pk=mesa_id, activa=True)
+            if mesa.estado == Mesa.Estado.POR_LIMPIAR:
+                raise ValidationError("La mesa debe limpiarse antes de sentar un nuevo cliente.")
+            pedido = mesa.pedido_activo()
+            if pedido is not None:
+                return pedido, False
+            try:
+                with transaction.atomic():
+                    pedido = cls.objects.create(mesa=mesa, mesero=mesero)
+            except IntegrityError:
+                # Otro mesero la abrió en el mismo instante: se devuelve la suya.
+                return mesa.pedido_activo(), False
+            mesa.ocupar()
+            return pedido, True
+
+    @transaction.atomic
+    def mover_a(self, mesa_destino_id: int) -> None:
+        """Cambia a los comensales de mesa: la comanda pasa completa a una mesa disponible."""
+        if self.es_para_llevar:
+            raise ValidationError("Un pedido para llevar no tiene mesa.")
+        if self.estado in {self.Estado.CERRADO, self.Estado.ANULADO}:
+            raise ValidationError("Este pedido ya está cerrado o anulado.")
+        destino = Mesa.objects.select_for_update().filter(pk=mesa_destino_id, activa=True).first()
+        if destino is None or destino.pk == self.mesa_id:
+            raise ValidationError("Elige otra mesa del salón.")
+        if destino.estado != Mesa.Estado.DISPONIBLE or destino.pedido_activo() is not None:
+            raise ValidationError(f"La {destino} no está disponible.")
+        origen = self.mesa
+        estado_origen = origen.estado
+        self.mesa = destino
+        self.save(update_fields=["mesa", "actualizado_en"])
+        destino._cambiar_estado(estado_origen if estado_origen != Mesa.Estado.DISPONIBLE else Mesa.Estado.OCUPADA)
+        origen.marcar_disponible()
 
     # ---- consultas -------------------------------------------------------
     @property
@@ -129,7 +217,7 @@ class Pedido(models.Model):
             self.enviado_cocina_en = ahora
             self.save(update_fields=["enviado_cocina_en", "actualizado_en"])
         self.sincronizar_estado_desde_detalles()
-        if self.mesa.estado != Mesa.Estado.OCUPADA:
+        if self.mesa and self.mesa.estado != Mesa.Estado.OCUPADA:
             self.mesa.ocupar()
 
     @transaction.atomic
@@ -141,6 +229,8 @@ class Pedido(models.Model):
             raise ValidationError("No hay platillos que cobrar en esta mesa.")
         if self.sin_enviar.exists():
             raise ValidationError("Hay platillos sin enviar a cocina. Envíalos antes de pedir la cuenta.")
+        if self.es_para_llevar:
+            raise ValidationError("Los pedidos para llevar se cobran directo en caja.")
         self.mesa.marcar_por_facturar()
 
     @transaction.atomic
@@ -158,13 +248,20 @@ class Pedido(models.Model):
                 "Ya hay platillos en preparación o servidos. Solo un administrador puede anular este pedido."
             )
         # Lo que cocina ya preparó se consumió aunque no se cobre: queda registrado como merma.
+        from inventario.models import MovimientoStock
+
         for detalle in list(en_marcha.select_related("producto")):
-            detalle._descontar_insumos(f"Merma: pedido #{self.pk} anulado con platillo ya preparado")
+            detalle._descontar_insumos(
+                f"Merma: pedido #{self.pk} anulado con platillo ya preparado",
+                tipo=MovimientoStock.Tipo.MERMA,
+                motivo=MovimientoStock.Motivo.ANULACION,
+            )
         self.detalles.exclude(estado=DetallePedido.Estado.ANULADO).update(estado=DetallePedido.Estado.ANULADO)
         self.estado = self.Estado.ANULADO
         self.cerrado_en = timezone.now()
         self.save(update_fields=["estado", "cerrado_en", "actualizado_en"])
-        self.mesa.marcar_disponible()
+        if self.mesa:
+            self.mesa.marcar_disponible()
 
     @transaction.atomic
     def descontar_inventario(self) -> None:
@@ -216,6 +313,7 @@ class DetallePedido(models.Model):
     estado = models.CharField(max_length=3, choices=Estado.choices, default=Estado.PENDIENTE)
     enviado = models.BooleanField(default=False, help_text="True cuando el mesero lo envió a cocina.")
     enviado_en = models.DateTimeField(null=True, blank=True)
+    listo_en = models.DateTimeField(null=True, blank=True, help_text="Momento en que cocina lo marcó listo.")
     insumos_descontados = models.BooleanField(default=False)
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
@@ -238,6 +336,18 @@ class DetallePedido(models.Model):
         super().save(*args, **kwargs)
 
     # ---- transiciones de estado (sin retrocesos) -------------------------
+    def cambiar_cantidad(self, delta: int) -> None:
+        """Suma o resta unidades a un platillo aún sin enviar; en cero se quita de la comanda."""
+        self.pedido._exigir_abierto()
+        if self.enviado:
+            raise ValidationError("Ese platillo ya se envió a cocina; agrega uno nuevo o quítalo.")
+        nueva = self.cantidad + delta
+        if nueva <= 0:
+            self.delete()
+            return
+        self.cantidad = nueva
+        self.save(update_fields=["cantidad", "actualizado_en"])
+
     def cancelar(self) -> None:
         """Quita el platillo mientras cocina no lo haya empezado."""
         self.pedido._exigir_abierto()
@@ -266,7 +376,8 @@ class DetallePedido(models.Model):
         if self.estado != self.Estado.EN_PREPARACION:
             raise ValidationError("El platillo debe estar en preparación para marcarlo listo.")
         self.estado = self.Estado.LISTO
-        self.save(update_fields=["estado", "actualizado_en"])
+        self.listo_en = timezone.now()
+        self.save(update_fields=["estado", "listo_en", "actualizado_en"])
         self.pedido.sincronizar_estado_desde_detalles()
 
     def marcar_entregado(self) -> None:
@@ -277,7 +388,7 @@ class DetallePedido(models.Model):
         self.pedido.sincronizar_estado_desde_detalles()
 
     @transaction.atomic
-    def _descontar_insumos(self, nota: str = "") -> None:
+    def _descontar_insumos(self, nota: str = "", tipo: str = "SAL", motivo: str = "") -> None:
         """Descuenta del stock la receta de este platillo (una sola vez) y deja el movimiento.
 
         Nunca bloquea una venta: si el stock registrado no alcanza (la comida ya se sirvió),
@@ -304,7 +415,9 @@ class DetallePedido(models.Model):
             insumo.save(update_fields=["stock_actual"])
             MovimientoStock.objects.create(
                 insumo=insumo,
-                tipo=MovimientoStock.Tipo.SALIDA,
+                tipo=tipo,
+                motivo=motivo,
+                costo_unitario=insumo.costo_unitario,
                 cantidad=salida,
                 stock_resultante=insumo.stock_actual,
                 detalle_pedido=self,

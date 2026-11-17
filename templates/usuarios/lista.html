@@ -1,31 +1,35 @@
 {% extends "base.html" %}
 {% block title %}Usuarios{% endblock %}
-{% block heading %}Usuarios{% endblock %}
 {% block subtitle %}Administradores, cajeros, mesoneros y cocineros{% endblock %}
-{% block top_actions %}<a class="btn" href="{% url 'usuario_nuevo' %}">Nuevo usuario</a>{% endblock %}
+{% block heading %}Usuarios{% endblock %}
+{% block top_actions %}<a class="btn" href="{% url 'usuario_nuevo' %}">{% include "_icono.html" with nombre="mas" grosor="2.4" %}Nuevo usuario</a>{% endblock %}
 {% block content %}
-<section class="card">
-  <table>
-    <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
-    <tbody>
-      {% for fila in usuarios %}
-        <tr>
-          <td>{{ fila.usuario.username }}</td>
-          <td>{{ fila.usuario.first_name }}</td>
-          <td>{{ fila.rol }}</td>
-          <td>{% if fila.usuario.is_active %}Activo{% else %}Inactivo{% endif %}</td>
-          <td class="stack">
-            <a href="{% url 'usuario_editar' fila.usuario.pk %}">Editar</a>
-            {% if fila.usuario.pk != request.user.pk %}
-              <form method="post" action="{% url 'usuario_alternar' fila.usuario.pk %}">
-                {% csrf_token %}
-                <button class="ghost" type="submit">{% if fila.usuario.is_active %}Desactivar{% else %}Activar{% endif %}</button>
-              </form>
-            {% endif %}
-          </td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<section class="card subir">
+  <div class="tabla-caja">
+    <table>
+      <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th class="der">Acciones</th></tr></thead>
+      <tbody>
+        {% for fila in usuarios %}
+          <tr>
+            <td><span class="stack"><span class="avatar" style="width:32px;height:32px;font-size:13px" aria-hidden="true">{{ fila.usuario.username|slice:":1" }}</span><strong>{{ fila.usuario.username }}</strong></span></td>
+            <td>{{ fila.usuario.first_name|default:"—" }}</td>
+            <td>{{ fila.rol }}</td>
+            <td>{% if fila.usuario.is_active %}<span class="pill ok">Activo</span>{% else %}<span class="pill gris">Inactivo</span>{% endif %}</td>
+            <td class="der">
+              <span class="stack" style="justify-content: flex-end">
+                <a class="btn sm secundario" href="{% url 'usuario_editar' fila.usuario.pk %}">Editar</a>
+                {% if fila.usuario.pk != request.user.pk %}
+                  <form method="post" action="{% url 'usuario_alternar' fila.usuario.pk %}" onsubmit="return confirm('¿{% if fila.usuario.is_active %}Desactivar{% else %}Activar{% endif %} a {{ fila.usuario.username }}?');">
+                    {% csrf_token %}
+                    <button class="btn sm {% if fila.usuario.is_active %}peligro{% else %}secundario{% endif %}" type="submit">{% if fila.usuario.is_active %}Desactivar{% else %}Activar{% endif %}</button>
+                  </form>
+                {% endif %}
+              </span>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

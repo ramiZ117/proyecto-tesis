@@ -1,23 +1,25 @@
 {% load humanize %}
-<section class="mesa-grid" style="--cols: {{ columnas }}">
+<section class="mesa-grid" style="--cols: {{ columnas }}" aria-label="Mesas del salón">
   {% for mesa in mesas %}
     <form method="post"
           action="{% if mesa.estado == 'LIM' %}{% url 'mesas:limpiar' mesa.pk %}{% else %}{% url 'mesas:abrir' mesa.pk %}{% endif %}"
           {% if usar_posiciones %}style="grid-column: {{ mesa.pos_x|add:1 }}; grid-row: {{ mesa.pos_y|add:1 }}"{% endif %}>
       {% csrf_token %}
-      <button class="mesa {{ mesa.estado }}" type="submit">
-        <div>
-          <div class="num">Mesa {{ mesa.numero }}</div>
-          <div class="muted">{{ mesa.capacidad }} personas</div>
-          {% if mesa.pedido_info %}
-            <div class="obs">Atiende: {{ mesa.pedido_info.mesero.username }}</div>
-            <div class="obs">Consumo: Bs. {{ mesa.pedido_info.subtotal|intcomma }}</div>
-          {% endif %}
-        </div>
-        <span class="pill">{{ mesa.get_estado_display }}{% if mesa.estado == 'LIM' %} · tocar para liberar{% endif %}</span>
+      <button class="mesa {{ mesa.estado }}{% if mesa.capacidad >= 6 %} grande{% endif %}{% if mesa.seleccionada %} sel{% endif %}" type="submit"
+              aria-label="Mesa {{ mesa.numero }}, {{ mesa.get_estado_display }}"{% if mesa.seleccionada %} aria-current="true"{% endif %}>
+        <span class="fila">
+          <span class="num">{{ mesa.numero }}</span>
+          <span class="cap">{% include "_icono.html" with nombre="persona" %}{{ mesa.capacidad }}</span>
+        </span>
+        <span class="pill {{ mesa.estado }}">{{ mesa.get_estado_display }}</span>
+        <span class="info">
+          {% if mesa.estado == 'LIM' %}Toca para liberarla
+          {% elif mesa.pedido_info %}{{ mesa.pedido_info.mesero.username }} · {{ mesa.pedido_info.creado_en|timesince }}{% if mesa.listos_info %} · {{ mesa.listos_info }} listo{{ mesa.listos_info|pluralize }}{% endif %}
+          {% else %}Mesa {{ mesa.numero }} · {{ mesa.capacidad }} personas{% endif %}
+        </span>
       </button>
     </form>
   {% empty %}
-    <p class="card">No hay mesas. Ejecuta <code>python manage.py seed_restaurante</code>.</p>
+    <p class="vacio" style="grid-column: 1 / -1">No hay mesas. Ejecuta <code>python manage.py seed_restaurante</code>.</p>
   {% endfor %}
 </section>

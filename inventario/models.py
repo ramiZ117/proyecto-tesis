@@ -1,16 +1,44 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
 
 
 class Categoria(models.Model):
+    class Estacion(models.TextChoices):
+        PARRILLA = "PAR", "Parrilla"
+        FRIOS = "FRI", "Fríos"
+        BEBIDAS = "BEB", "Bebidas"
+
     nombre = models.CharField(max_length=80, unique=True)
     activa = models.BooleanField(default=True)
+    estacion = models.CharField(
+        max_length=3,
+        choices=Estacion.choices,
+        default=Estacion.PARRILLA,
+        help_text="Estación de cocina que prepara los platos de esta categoría (filtro del monitor).",
+    )
+    orden = models.PositiveSmallIntegerField(default=0, help_text="Orden en la carta (menor primero).")
 
     class Meta:
         verbose_name = "categoría"
         verbose_name_plural = "categorías"
+        ordering = ["orden", "nombre"]
+
+    def __str__(self) -> str:
+        return self.nombre
+
+
+class Proveedor(models.Model):
+    nombre = models.CharField(max_length=120, unique=True)
+    contacto = models.CharField(max_length=120, blank=True)
+    telefono = models.CharField(max_length=40, blank=True)
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "proveedor"
+        verbose_name_plural = "proveedores"
         ordering = ["nombre"]
 
     def __str__(self) -> str:
@@ -25,29 +53,42 @@ class Insumo(models.Model):
         MILILITRO = "ML", "Mililitro"
         LITRO = "L", "Litro"
 
+    class Grupo(models.TextChoices):
+        CARNES = "CAR", "Carnes"
+        GRANOS = "GRA", "Granos y legumbres"
+        PANADERIA = "PAN", "Panadería"
+        VEGETALES = "VEG", "Vegetales y hierbas"
+        LACTEOS = "LAC", "Lácteos"
+        ESPECIAS = "ESP", "Especias y salsas"
+        BEBIDAS = "BEB", "Bebidas"
+        OTROS = "OTR", "Otros"
+
+    ABREVIATURA = {"UN": "und", "G": "g", "KG": "kg", "ML": "ml", "L": "L"}
+
     nombre = models.CharField(max_length=120, unique=True)
-    grupo = models.CharField(
-        max_length=3,
-        choices=[
-            ("CAR", "Carnes"),
-            ("BEB", "Bebidas"),
-            ("VEG", "Vegetales"),
-        ],
-        default="VEG",
-        help_text="Clasificación de inventario.",
-    )
+    grupo = models.CharField(max_length=3, choices=Grupo.choices, default=Grupo.OTROS, help_text="Clasificación de inventario.")
     unidad = models.CharField(max_length=4, choices=Unidad.choices, default=Unidad.UNIDAD)
     stock_actual = models.DecimalField(
-        max_digits=12,
-        decimal_places=3,
-        default=Decimal("0.000"),
-        validators=[MinValueValidator(Decimal("0"))],
+        max_digits=12, decimal_places=3, default=Decimal("0.000"), validators=[MinValueValidator(Decimal("0"))]
     )
     stock_minimo = models.DecimalField(
-        max_digits=12,
-        decimal_places=3,
-        default=Decimal("0.000"),
-        validators=[MinValueValidator(Decimal("0"))],
+        max_digits=12, decimal_places=3, default=Decimal("0.000"), validators=[MinValueValidator(Decimal("0"))],
+        help_text="Inventario de seguridad: por debajo de este nivel el insumo está en estado crítico.",
+    )
+    punto_reposicion = models.DecimalField(
+        max_digits=12, decimal_places=3, default=Decimal("0.000"), validators=[MinValueValidator(Decimal("0"))],
+        help_text="Al llegar a este nivel el insumo aparece en la lista de compra sugerida.",
+    )
+    stock_maximo = models.DecimalField(
+        max_digits=12, decimal_places=3, default=Decimal("0.000"), validators=[MinValueValidator(Decimal("0"))],
+        help_text="Nivel hasta el que conviene reponer (evita comprar de más perecederos).",
+    )
+    costo_unitario = models.DecimalField(
+        max_digits=12, decimal_places=4, default=Decimal("0.0000"), validators=[MinValueValidator(Decimal("0"))],
+        help_text="Costo de compra en USD por unidad de medida.",
+    )
+    proveedor = models.ForeignKey(
+        Proveedor, on_delete=models.SET_NULL, null=True, blank=True, related_name="insumos"
     )
     activo = models.BooleanField(default=True)
 
@@ -60,16 +101,16 @@ class Insumo(models.Model):
         return f"{self.nombre} ({self.stock_actual} {self.get_unidad_display()})"
 
     @property
+    def abreviatura(self) -> str:
+        return self.ABREVIATURA.get(self.unidad, self.unidad)
+
+    @property
     def stock_bajo(self) -> bool:
         return self.stock_actual <= self.stock_minimo
 
 
 class Producto(models.Model):
-    categoria = models.ForeignKey(
-        Categoria,
-        on_delete=models.PROTECT,
-        related_name="productos",
-    )
+    categoria = models.ForeignKey(Categoria, on_delete=models.PROTECT, related_name="productos")
     nombre = models.CharField(max_length=120)
     descripcion = models.TextField(blank=True)
     precio_usd = models.DecimalField(
@@ -84,7 +125,7 @@ class Producto(models.Model):
     class Meta:
         verbose_name = "producto"
         verbose_name_plural = "productos"
-        ordering = ["categoria__nombre", "nombre"]
+        ordering = ["categoria__orden", "categoria__nombre", "nombre"]
         constraints = [
             models.UniqueConstraint(fields=["categoria", "nombre"], name="uniq_producto_categoria_nombre"),
         ]
@@ -103,16 +144,8 @@ class Producto(models.Model):
 class Receta(models.Model):
     """Lista de insumos que consume un platillo (BOM)."""
 
-    producto = models.ForeignKey(
-        Producto,
-        on_delete=models.CASCADE,
-        related_name="recetas",
-    )
-    insumo = models.ForeignKey(
-        Insumo,
-        on_delete=models.PROTECT,
-        related_name="recetas",
-    )
+    producto = models.ForeignKey(Producto, on_delete=models.CASCADE, related_name="recetas")
+    insumo = models.ForeignKey(Insumo, on_delete=models.PROTECT, related_name="recetas")
     cantidad = models.DecimalField(
         max_digits=12,
         decimal_places=3,
@@ -135,22 +168,31 @@ class MovimientoStock(models.Model):
     class Tipo(models.TextChoices):
         ENTRADA = "ENT", "Entrada"
         SALIDA = "SAL", "Salida (venta)"
+        MERMA = "MER", "Merma"
         AJUSTE = "AJU", "Ajuste"
+
+    class Motivo(models.TextChoices):
+        VENCIDO = "VEN", "Vencido"
+        DANADO = "DAN", "Dañado"
+        ERROR = "ERR", "Error de preparación"
+        ANULACION = "ANU", "Comanda anulada ya preparada"
+        CONTEO = "CON", "Conteo físico"
+        OTRO = "OTR", "Otro"
 
     insumo = models.ForeignKey(Insumo, on_delete=models.PROTECT, related_name="movimientos")
     tipo = models.CharField(max_length=3, choices=Tipo.choices)
-    cantidad = models.DecimalField(
-        max_digits=12,
-        decimal_places=3,
-        validators=[MinValueValidator(Decimal("0.001"))],
-    )
+    motivo = models.CharField(max_length=3, choices=Motivo.choices, blank=True)
+    cantidad = models.DecimalField(max_digits=12, decimal_places=3, validators=[MinValueValidator(Decimal("0.001"))])
     stock_resultante = models.DecimalField(max_digits=12, decimal_places=3)
+    costo_unitario = models.DecimalField(
+        max_digits=12, decimal_places=4, default=Decimal("0.0000"),
+        help_text="Costo USD por unidad al momento del movimiento (valoriza mermas y compras).",
+    )
     detalle_pedido = models.ForeignKey(
-        "mesas.DetallePedido",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="movimientos_stock",
+        "mesas.DetallePedido", on_delete=models.SET_NULL, null=True, blank=True, related_name="movimientos_stock"
+    )
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="movimientos_stock"
     )
     nota = models.CharField(max_length=200, blank=True)
     creado_en = models.DateTimeField(auto_now_add=True)
@@ -158,7 +200,11 @@ class MovimientoStock(models.Model):
     class Meta:
         verbose_name = "movimiento de stock"
         verbose_name_plural = "movimientos de stock"
-        ordering = ["-creado_en"]
+        ordering = ["-creado_en", "-id"]
 
     def __str__(self) -> str:
         return f"{self.get_tipo_display()} {self.cantidad} {self.insumo.nombre}"
+
+    @property
+    def valor_usd(self) -> Decimal:
+        return (self.cantidad * self.costo_unitario).quantize(Decimal("0.01"))

@@ -9,3 +9,5 @@ staticfiles/
 *.log
 .idea/
 .vscode/
+*.sqlite3-wal
+*.sqlite3-shm

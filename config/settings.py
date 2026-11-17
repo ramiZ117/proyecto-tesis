@@ -7,6 +7,7 @@ desarrollo (DEBUG activo, SQLite).
 """
 
 import os
+import sys
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -88,6 +89,7 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 'config.context_processors.parcial',
                 'config.context_processors.roles',
+                'config.context_processors.tasa',
                 'config.context_processors.alertas_inventario',
             ],
         },
@@ -97,26 +99,26 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 
-# Base de datos: SQLite por defecto; PostgreSQL con DB_ENGINE=postgresql
-# (recomendado en producción: SQLite ignora select_for_update).
-if os.environ.get("DB_ENGINE") == "postgresql":
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': os.environ.get("DB_NAME", "el_amir_db"),
-            'USER': os.environ.get("DB_USER", "postgres"),
-            'PASSWORD': os.environ.get("DB_PASSWORD", ""),
-            'HOST': os.environ.get("DB_HOST", "localhost"),
-            'PORT': os.environ.get("DB_PORT", "5432"),
-        }
+# Base de datos: SQLite (un solo local, servidor en la intranet, respaldo = copiar un archivo).
+#
+# SQLite ignora select_for_update, así que la concurrencia se resuelve de otra forma:
+# - transaction_mode=IMMEDIATE: cada transacción (transaction.atomic) toma el candado de
+#   escritura al empezar. Dos cobros, dos aperturas de mesa o dos cierres simultáneos se
+#   ejecutan uno detrás del otro, y el segundo ya ve lo que escribió el primero.
+# - journal_mode=WAL: las lecturas (mapa, cocina, reportes) no esperan a las escrituras.
+# - timeout: una transacción espera hasta 20 s por el candado en vez de fallar enseguida.
+# Las reglas críticas además están protegidas con restricciones de unicidad en la base.
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': os.environ.get("DB_PATH") or BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {
+            'transaction_mode': 'IMMEDIATE',
+            'timeout': 20,
+            'init_command': 'PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;',
+        },
     }
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+}
 
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -126,6 +128,11 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
+
+# En las pruebas automáticas, PBKDF2 con menos iteraciones: el cifrado real es lento a propósito y
+# multiplicaba por diez la duración de la suite. Nunca aplica fuera de `manage.py test`.
+if len(sys.argv) > 1 and sys.argv[1] == "test":
+    PASSWORD_HASHERS = ["config.hashers_pruebas.PBKDF2Rapido"]
 
 LANGUAGE_CODE = 'es-ve'
 TIME_ZONE = 'America/Caracas'

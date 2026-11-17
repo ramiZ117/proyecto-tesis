@@ -1,21 +1,25 @@
 {% extends "base.html" %}
 {% block title %}{{ titulo }}{% endblock %}
-{% block heading %}{{ titulo }}{% endblock %}
 {% block subtitle %}Las contraseñas se guardan cifradas{% endblock %}
+{% block heading %}{{ titulo }}{% endblock %}
 {% block content %}
-<section class="card comp">
+<section class="card subir" style="max-width: 560px">
   <form method="post">
     {% csrf_token %}
+    {% for error in form.non_field_errors %}<p class="error-campo">{{ error }}</p>{% endfor %}
     {% for campo in form %}
-      <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
-      {{ campo }}
-      {% for error in campo.errors %}<div class="obs" style="color:#b33b3b">{{ error }}</div>{% endfor %}
+      {% if campo.field.widget.input_type == "checkbox" %}
+        <label class="stack" for="{{ campo.id_for_label }}" style="margin-top: 16px">{{ campo }} {{ campo.label }}</label>
+      {% else %}
+        <label for="{{ campo.id_for_label }}">{{ campo.label }}{% if campo.field.required %} <span aria-hidden="true" style="color: var(--rojo-tinta)">*</span>{% endif %}</label>
+        {{ campo }}
+      {% endif %}
+      {% for error in campo.errors %}<div class="error-campo" role="alert">{{ error }}</div>{% endfor %}
     {% endfor %}
-    {% for error in form.non_field_errors %}<div class="obs" style="color:#b33b3b">{{ error }}</div>{% endfor %}
-    <p class="hint muted">Al editar, deja la contraseña vacía para conservar la actual.</p>
-    <p class="stack">
+    <p class="hint">Al editar, deja la contraseña vacía para conservar la actual. Mínimo 8 caracteres, que no sea solo números ni se parezca al usuario.</p>
+    <p class="stack" style="margin-bottom: 0">
       <button class="btn" type="submit">Guardar</button>
-      <a class="btn secondary" href="{% url 'usuarios' %}">Cancelar</a>
+      <a class="btn secundario" href="{% url 'usuarios' %}">Cancelar</a>
     </p>
   </form>
 </section>

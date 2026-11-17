@@ -157,7 +157,7 @@ class AlertasDeStockTests(DatosBase):
     def test_inventario_resalta_los_criticos_primero(self):
         Insumo.objects.filter(pk=self.pan.pk).update(stock_actual=Decimal("0.5"))
         r = self.cliente(self.cajero).get("/inventario/")
-        self.assertContains(r, "CRÍTICO")
+        self.assertContains(r, ">Crítico<")
         self.assertEqual(r.context["insumos"][0].pk, self.pan.pk)
 
 

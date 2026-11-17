@@ -3,9 +3,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from mesas.models import Mesa, Pedido
 
@@ -121,25 +122,40 @@ class Factura(models.Model):
         if total_local <= 0:
             raise ValidationError("El total del pedido es cero; no se puede facturar.")
         tasa = TasaCambio.vigente()
-        factura = cls.objects.create(
-            pedido=pedido,
-            cajero=cajero,
-            numero=cls._siguiente_numero(),
-            tasa_cambio=tasa.valor,
-            subtotal_local=total_local,
-            total_local=total_local,
-            total_usd=tasa.a_usd(total_local),
-        )
-        if pedido.mesa.estado != Mesa.Estado.POR_FACTURAR:
+        factura = None
+        for _ in range(cls.INTENTOS_NUMERO):
+            try:
+                # Punto de guardado: si el número choca, solo se deshace este intento.
+                with transaction.atomic():
+                    factura = cls.objects.create(
+                        pedido=pedido,
+                        cajero=cajero,
+                        numero=cls._siguiente_numero(),
+                        tasa_cambio=tasa.valor,
+                        subtotal_local=total_local,
+                        total_local=total_local,
+                        total_usd=tasa.a_usd(total_local),
+                    )
+                break
+            except IntegrityError:
+                if pedido.factura_activa:
+                    raise ValidationError("Este pedido ya tiene una factura vigente.")
+                # Otro cajero tomó el mismo correlativo: se recalcula y se reintenta.
+        if factura is None:
+            raise ValidationError("No se pudo asignar el número de factura. Intenta de nuevo.")
+        if pedido.mesa and pedido.mesa.estado != Mesa.Estado.POR_FACTURAR:
             pedido.mesa.marcar_por_facturar()
         return factura
 
+    INTENTOS_NUMERO = 5
+
     @classmethod
     def _siguiente_numero(cls) -> str:
+        """Correlativo F-000001, F-000002… siguiente al último emitido (las anuladas también consumen número)."""
         ultimo = cls.objects.order_by("-id").values_list("numero", flat=True).first()
         if not ultimo:
             return "F-000001"
-        return f"F-{int(ultimo.split('-')[-1]) + 1:06d}"
+        return f"F-{int(ultimo.rsplit('-', 1)[-1]) + 1:06d}"
 
     @transaction.atomic
     def cobrar(self, *, metodo: str, monto: Decimal, referencia: str = "", pagador: str = ""):
@@ -174,7 +190,8 @@ class Factura(models.Model):
         self.pedido.estado = Pedido.Estado.CERRADO
         self.pedido.cerrado_en = ahora
         self.pedido.save(update_fields=["estado", "cerrado_en", "actualizado_en"])
-        self.pedido.mesa.marcar_por_limpiar()
+        if self.pedido.mesa:
+            self.pedido.mesa.marcar_por_limpiar()
 
     @transaction.atomic
     def anular(self, motivo: str) -> None:
@@ -190,7 +207,7 @@ class Factura(models.Model):
         factura.anulada_en = timezone.now()
         factura.motivo_anulacion = motivo.strip()[:200]
         factura.save(update_fields=["estado", "anulada_en", "motivo_anulacion"])
-        if factura.pedido.mesa.estado == Mesa.Estado.POR_FACTURAR:
+        if factura.pedido.mesa and factura.pedido.mesa.estado == Mesa.Estado.POR_FACTURAR:
             factura.pedido.mesa.ocupar()
         self.estado = factura.estado
 
@@ -221,7 +238,7 @@ class Factura(models.Model):
         factura.anulada_en = timezone.now()
         factura.motivo_anulacion = motivo.strip()[:200]
         factura.save(update_fields=["estado", "anulada_en", "motivo_anulacion"])
-        if not estaba_pagada and factura.pedido.mesa.estado == Mesa.Estado.POR_FACTURAR:
+        if not estaba_pagada and factura.pedido.mesa and factura.pedido.mesa.estado == Mesa.Estado.POR_FACTURAR:
             factura.pedido.mesa.ocupar()
         self.estado = factura.estado
         return devoluciones
@@ -461,6 +478,10 @@ class CierreCaja(models.Model):
         on_delete=models.PROTECT,
         related_name="cierres_caja",
     )
+    secuencia = models.PositiveIntegerField(
+        default=1,
+        help_text="Consecutivo del cajero (1, 2, 3…). Cada cierre toma solo lo nuevo desde el anterior.",
+    )
     tasa_cambio = models.DecimalField(max_digits=14, decimal_places=4)
     total_local = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
     total_usd = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
@@ -476,13 +497,59 @@ class CierreCaja(models.Model):
         verbose_name = "cierre de caja"
         verbose_name_plural = "cierres de caja"
         ordering = ["-hasta"]
+        constraints = [
+            # Dos cierres simultáneos del mismo cajero calcularían el mismo tramo: solo uno se guarda.
+            models.UniqueConstraint(fields=["cajero", "secuencia"], name="uniq_cierre_secuencia_por_cajero"),
+        ]
 
     def __str__(self) -> str:
         return f"Cierre {self.fecha} · {self.cajero}"
 
     @classmethod
     def ultimo_de(cls, cajero):
-        return cls.objects.filter(cajero=cajero).order_by("-hasta").first()
+        return cls.objects.filter(cajero=cajero).order_by("-secuencia").first()
+
+    def datos_guardados(self) -> dict:
+        """El corte tal como quedó al generarse (no se recalcula con datos posteriores).
+
+        Devuelve el mismo formato que `calcular`, para usar las mismas plantillas y el mismo CSV.
+        Las facturas se leen de la foto guardada; los cierres anteriores a esa foto las consultan.
+        """
+        d = self.desglose or {}
+        dec = lambda v: Decimal(str(v)) if v not in (None, "") else Decimal("0.00")  # noqa: E731
+        lineas = []
+        for linea in d.get("lineas", []):
+            lineas.append(
+                {
+                    **linea,
+                    **{k: dec(linea.get(k)) for k in
+                       ("recibido", "aplicado_local", "vuelto_local", "devuelto", "devuelto_local")},
+                }
+            )
+        if "facturas" in d:
+            facturas = [
+                {**f, "total_local": dec(f["total_local"]), "total_usd": dec(f["total_usd"]),
+                 "pagada_en": parse_datetime(f["pagada_en"]) if f.get("pagada_en") else None}
+                for f in d["facturas"]
+            ]
+        else:
+            facturas = CierreCaja.calcular(self.cajero, self.desde, self.hasta)["facturas"]
+        return {
+            "desde": self.desde,
+            "hasta": self.hasta,
+            "lineas": lineas,
+            "facturas": facturas,
+            "cantidad_facturas": self.cantidad_facturas,
+            "facturas_anuladas": self.facturas_anuladas,
+            "cantidad_pagos": d.get("cantidad_pagos", 0),
+            "cantidad_devoluciones": d.get("cantidad_devoluciones", 0),
+            "devuelto_local": dec(d.get("devuelto_local")),
+            "total_local": self.total_local,
+            "total_usd": self.total_usd,
+            "vuelto_local": dec(d.get("vuelto_local")),
+            "efectivo_bs_neto": dec(d.get("efectivo_bs_neto")),
+            "divisas_usd": dec(d.get("divisas_usd")),
+        }
 
     @classmethod
     def calcular(cls, cajero=None, desde=None, hasta=None) -> dict:
@@ -562,7 +629,7 @@ class CierreCaja(models.Model):
                 divisas_usd -= dev.monto
 
         lineas = sorted(acumulado.values(), key=lambda x: x["metodo_label"])
-        facturas = list(facturas.order_by("pagada_en"))
+        facturas = [_foto_factura(f) for f in facturas.order_by("pagada_en")]
         return {
             "desde": desde,
             "hasta": hasta,
@@ -594,26 +661,50 @@ class CierreCaja(models.Model):
         ):
             raise ValidationError("No hay movimientos nuevos desde el último cierre.")
         tasa = TasaCambio.vigente()
-        return cls.objects.create(
-            fecha=timezone.localdate(),
-            cajero=cajero,
-            tasa_cambio=tasa.valor,
-            total_local=datos["total_local"],
-            total_usd=datos["total_usd"],
-            cantidad_facturas=datos["cantidad_facturas"],
-            facturas_anuladas=datos["facturas_anuladas"],
-            desde=datos["desde"],
-            hasta=hasta,
-            desglose={
-                "lineas": [
-                    {k: (str(v) if isinstance(v, Decimal) else v) for k, v in linea.items()}
-                    for linea in datos["lineas"]
-                ],
-                "vuelto_local": str(datos["vuelto_local"]),
-                "efectivo_bs_neto": str(datos["efectivo_bs_neto"]),
-                "divisas_usd": str(datos["divisas_usd"]),
-                "cantidad_pagos": datos["cantidad_pagos"],
-                "cantidad_devoluciones": datos["cantidad_devoluciones"],
-                "devuelto_local": str(datos["devuelto_local"]),
-            },
-        )
+        try:
+            with transaction.atomic():
+                return cls.objects.create(
+                    fecha=timezone.localdate(),
+                    cajero=cajero,
+                    secuencia=(ultimo.secuencia + 1) if ultimo else 1,
+                    tasa_cambio=tasa.valor,
+                    total_local=datos["total_local"],
+                    total_usd=datos["total_usd"],
+                    cantidad_facturas=datos["cantidad_facturas"],
+                    facturas_anuladas=datos["facturas_anuladas"],
+                    desde=datos["desde"],
+                    hasta=hasta,
+                    desglose={
+                        "lineas": [
+                            {k: (str(v) if isinstance(v, Decimal) else v) for k, v in linea.items()}
+                            for linea in datos["lineas"]
+                        ],
+                        "vuelto_local": str(datos["vuelto_local"]),
+                        "efectivo_bs_neto": str(datos["efectivo_bs_neto"]),
+                        "divisas_usd": str(datos["divisas_usd"]),
+                        "cantidad_pagos": datos["cantidad_pagos"],
+                        "cantidad_devoluciones": datos["cantidad_devoluciones"],
+                        "devuelto_local": str(datos["devuelto_local"]),
+                        "facturas": [
+                            {k: (v.isoformat() if hasattr(v, "isoformat") else str(v) if isinstance(v, Decimal) else v)
+                             for k, v in f.items()}
+                            for f in datos["facturas"]
+                        ],
+                    },
+                )
+        except IntegrityError:
+            raise ValidationError("Ya se generó un cierre para este tramo. Revisa el historial de cierres.")
+
+
+def _foto_factura(f: "Factura") -> dict:
+    """Datos de una factura tal como se muestran en el cierre, sin depender de su estado futuro."""
+    return {
+        "pk": f.pk,
+        "numero": f.numero,
+        "mesa": f.pedido.mesa.numero if f.pedido.mesa_id else f.pedido.codigo,
+        "cajero": f.cajero.username,
+        "total_local": f.total_local,
+        "total_usd": f.total_usd,
+        "pagada_en": f.pagada_en,
+        "estado": f.estado,
+    }

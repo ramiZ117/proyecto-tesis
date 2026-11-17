@@ -1,16 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Cierre {{ cierre.fecha }}{% endblock %}
+{% block subtitle %}Cierre n.º {{ cierre.secuencia }} de {{ cierre.cajero.username }} · {{ cierre.cerrado_en|date:"d/m/Y H:i" }} · tasa {{ cierre.tasa_cambio|floatformat:2 }} Bs{% endblock %}
 {% block heading %}Cierre de caja {{ cierre.fecha|date:"d/m/Y" }}{% endblock %}
-{% block subtitle %}Cajero {{ cierre.cajero.username }} · cerrado {{ cierre.cerrado_en|date:"d/m/Y H:i" }} · tasa 1 USD = {{ cierre.tasa_cambio }} Bs.{% endblock %}
 {% block top_actions %}
   <div class="stack no-print">
-    <button class="btn secondary" type="button" onclick="window.print()">Imprimir</button>
-    <a class="btn secondary" href="{% url 'caja:cierre_csv' cierre.pk %}">Exportar CSV</a>
-    <a class="btn secondary" href="{% url 'caja:historial' %}">Historial</a>
+    <button class="btn secundario" type="button" onclick="window.print()">{% include "_icono.html" with nombre="imprimir" %}Imprimir</button>
+    <a class="btn secundario" href="{% url 'caja:cierre_csv' cierre.pk %}">{% include "_icono.html" with nombre="descargar" %}Exportar CSV</a>
+    <a class="btn secundario" href="{% url 'caja:historial' %}">Historial</a>
   </div>
 {% endblock %}
 {% block content %}
-<section class="card">
+<section class="card subir">
+  <p class="obs" style="margin-top:0">Período: {% if cierre.desde %}{{ cierre.desde|date:"d/m/Y H:i" }}{% else %}inicio{% endif %} → {{ cierre.hasta|date:"d/m/Y H:i" }}. Los totales son los que quedaron guardados al generar el cierre.</p>
   {% include "caja/_desglose.html" %}
 </section>
 {% endblock %}

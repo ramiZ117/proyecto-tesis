@@ -1,84 +1,150 @@
 {% extends "base.html" %}
-{% load humanize %}
+{% load humanize l10n %}
 {% block title %}Inventario{% endblock %}
+{% block subtitle %}Disponible = stock físico menos lo ya pedido en comandas abiertas{% endblock %}
 {% block heading %}Inventario{% endblock %}
-{% block subtitle %}Stock, reposición y recetas del menú{% endblock %}
-{% block content %}
-<section class="split">
-  <div class="card">
-    <h2>Insumos {% if criticos %}<span class="pill pill-crit">{{ criticos }} en nivel crítico</span>{% endif %}</h2>
-    <table>
-      <thead><tr><th>Insumo</th><th>Grupo</th><th>Stock</th><th>Comprometido</th><th>Disponible</th><th>Mínimo</th></tr></thead>
-      <tbody>
-        {% for i in insumos %}
-          <tr{% if i.critico %} class="fila-critica"{% endif %}>
-            <td>{{ i.nombre }}</td>
-            <td>{{ i.get_grupo_display }}</td>
-            <td>{{ i.stock_actual }} {{ i.get_unidad_display }}</td>
-            <td>{{ i.comprometido }}</td>
-            <td>{{ i.disponible }}{% if i.critico %} · <strong>CRÍTICO</strong>{% endif %}</td>
-            <td>{{ i.stock_minimo }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <p class="muted">El stock baja al cobrar la cuenta. "Comprometido" son los platillos ya pedidos que aún no se cobran.</p>
-
-    <h3>Registrar entrada (reposición)</h3>
-    <form method="post" action="{% url 'inventario:entrada' %}">
-      {% csrf_token %}
-      <label for="insumo_id">Insumo</label>
-      <select id="insumo_id" name="insumo_id" required>
-        {% for i in insumos %}<option value="{{ i.pk }}">{{ i.nombre }} ({{ i.get_unidad_display }})</option>{% endfor %}
-      </select>
-      <label for="cantidad">Cantidad recibida</label>
-      <input id="cantidad" name="cantidad" type="number" step="0.001" min="0.001" required>
-      <label for="nota">Nota (proveedor, factura...)</label>
-      <input id="nota" name="nota" maxlength="200">
-      <p><button class="btn" type="submit">Registrar entrada</button></p>
-    </form>
+{% block top_actions %}
+  <div class="campo-icono" style="min-width: 240px">
+    {% include "_icono.html" with nombre="buscar" %}
+    <label class="oculto" for="buscar-insumo">Buscar insumo o proveedor</label>
+    <input id="buscar-insumo" type="search" placeholder="Buscar insumo o proveedor" data-filtro-texto="insumos" autocomplete="off">
   </div>
+{% endblock %}
+{% block content %}
+<section class="grid-auto" style="--min: 200px; margin-bottom: 18px" aria-label="Resumen">
+  <article class="kpi oscuro alzar subir d1"><small>Valor del inventario</small><strong>${{ valor_inventario|intcomma }}</strong><span>a costo de compra</span></article>
+  <article class="kpi alzar subir d2"><small>Críticos</small><strong style="color: var(--rojo-tinta)">{{ criticos }}</strong><span>por debajo del mínimo</span></article>
+  <article class="kpi alzar subir d3"><small>Por reponer</small><strong style="color: var(--amarillo-tinta)">{{ por_reponer }}</strong><span>llegaron al punto de reposición</span></article>
+  <article class="kpi alzar subir d4"><small>Merma del mes</small><strong>${{ merma_mes|intcomma }}</strong><span>vencido, dañado o anulado</span></article>
+</section>
 
-  <div>
-    <div class="card">
-      <h2>Menú y recetas</h2>
-      {% for p in productos %}
-        <p>
-          <strong>{{ p.nombre }}</strong> · USD {{ p.precio_usd }} · Bs. {{ p.precio_local|intcomma }}
-          {% if p.porciones is not None %}
-            {% if p.porciones == 0 %}<span class="pill pill-crit">Agotado</span>
-            {% else %}<span class="muted">· {{ p.porciones }} porciones</span>{% endif %}
-          {% endif %}
-        </p>
-        <p class="obs">
-          {% for r in p.recetas.all %}
-            {{ r.cantidad }} {{ r.insumo.get_unidad_display }} de {{ r.insumo.nombre }}{% if not forloop.last %} · {% endif %}
-          {% empty %}
-            Sin receta cargada.
-          {% endfor %}
-        </p>
+<div class="split">
+  <section class="card principal subir d3" aria-label="Insumos">
+    <div class="chips" role="group" aria-label="Grupo" style="margin-bottom: 12px">
+      <button class="chip" type="button" data-filtro-chip="insumos" data-valor="" aria-pressed="true">Todos</button>
+      {% for clave, etiqueta in grupos %}
+        <button class="chip" type="button" data-filtro-chip="insumos" data-valor="{{ clave }}" aria-pressed="false">{{ etiqueta }}</button>
       {% endfor %}
     </div>
-
-    <div class="card" style="margin-top:16px">
-      <h2>Últimos movimientos</h2>
-      <table>
-        <thead><tr><th>Fecha</th><th>Tipo</th><th>Insumo</th><th>Cant.</th><th>Stock</th></tr></thead>
+    <div class="tabla-caja">
+      <table style="min-width: 760px">
+        <thead>
+          <tr><th>Insumo</th><th style="width: 200px">Nivel (mín · reposición · máx)</th><th>Disponible</th><th>Costo</th><th>Estado</th><th class="der">Acciones</th></tr>
+        </thead>
         <tbody>
-          {% for m in movimientos %}
-            <tr>
-              <td>{{ m.creado_en|date:"d/m H:i" }}</td>
-              <td>{{ m.get_tipo_display }}</td>
-              <td>{{ m.insumo.nombre }}</td>
-              <td>{{ m.cantidad }}</td>
-              <td>{{ m.stock_resultante }}</td>
+          {% for i in insumos %}
+            <tr class="{% if i.critico %}fila-critica{% endif %}" data-filtrable="insumos" data-categoria="{{ i.grupo }}" data-texto="{{ i.nombre }} {{ i.proveedor.nombre|default:'' }} {{ i.get_grupo_display }}">
+              <td><strong>{{ i.nombre }}</strong><div class="obs">{{ i.get_grupo_display }}{% if i.proveedor %} · {{ i.proveedor.nombre }}{% endif %}</div></td>
+              <td>
+                <div class="nivel" title="Stock {{ i.stock_actual|floatformat:'-3' }} {{ i.abreviatura }}">
+                  <div class="relleno {{ i.nivel }}" style="width: {{ i.pct_stock }}%"></div>
+                  <span class="marca-min" style="left: {{ i.pct_minimo }}%" title="Mínimo {{ i.stock_minimo|floatformat:'-3' }}"></span>
+                  <span class="marca-rep" style="left: {{ i.pct_reposicion }}%" title="Reposición {{ i.punto_reposicion|floatformat:'-3' }}"></span>
+                </div>
+                <div class="obs" style="margin-top: 5px">{{ i.stock_actual|floatformat:"-3" }}{% if i.stock_maximo %} de {{ i.stock_maximo|floatformat:"-3" }}{% endif %} {{ i.abreviatura }}</div>
+              </td>
+              <td><strong class="num">{{ i.disponible|floatformat:"-3" }} {{ i.abreviatura }}</strong>{% if i.comprometido %}<div class="obs">{{ i.comprometido|floatformat:"-3" }} reservado</div>{% endif %}</td>
+              <td class="obs num">${{ i.costo_unitario|floatformat:2 }} / {{ i.abreviatura }}</td>
+              <td>{% if i.critico %}<span class="pill crit">Crítico</span>{% elif i.reponer %}<span class="pill reponer">Reponer</span>{% else %}<span class="pill ok">Bien</span>{% endif %}</td>
+              <td class="der" style="white-space: nowrap">
+                <button class="btn-icono verde" type="button" data-mov-atajo="ENT" data-insumo="{{ i.pk }}" data-sugerida="{% if i.sugerido_compra %}{{ i.sugerido_compra|floatformat:'-3' }}{% endif %}" title="Entrada" aria-label="Registrar entrada de {{ i.nombre }}">{% include "_icono.html" with nombre="entrada" grosor="2.2" %}</button>
+                <button class="btn-icono rojo" type="button" data-mov-atajo="MER" data-insumo="{{ i.pk }}" title="Merma" aria-label="Registrar merma de {{ i.nombre }}">{% include "_icono.html" with nombre="merma" grosor="2.2" %}</button>
+                {% if puede_ajustar %}<button class="btn-icono" type="button" data-mov-atajo="AJU" data-insumo="{{ i.pk }}" data-sugerida="{{ i.stock_actual|floatformat:'-3' }}" title="Ajuste por conteo" aria-label="Ajustar {{ i.nombre }} por conteo">{% include "_icono.html" with nombre="ajuste" grosor="2.2" %}</button>{% endif %}
+              </td>
             </tr>
           {% empty %}
-            <tr><td colspan="5">Sin movimientos todavía.</td></tr>
+            <tr><td colspan="6" class="obs">No hay insumos activos. Cárgalos en el panel técnico.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+  </section>
+
+  <div class="lateral">
+    <form id="movimiento" class="card mov-form pila subir d4" method="post" action="{% url 'inventario:movimiento' %}" data-movimiento>
+      {% csrf_token %}
+      <h2 style="margin:0">Registrar movimiento</h2>
+      <input type="hidden" name="tipo" value="{{ tipo_activo }}">
+      <div class="segmentos gris" role="tablist" aria-label="Tipo de movimiento" style="display: grid; grid-template-columns: repeat({% if puede_ajustar %}3{% else %}2{% endif %}, minmax(0, 1fr))">
+        <button type="button" role="tab" data-tipo-mov="ENT" aria-selected="{% if tipo_activo == 'ENT' %}true{% else %}false{% endif %}">Entrada</button>
+        <button type="button" role="tab" data-tipo-mov="MER" aria-selected="{% if tipo_activo == 'MER' %}true{% else %}false{% endif %}">Merma</button>
+        {% if puede_ajustar %}<button type="button" role="tab" data-tipo-mov="AJU" aria-selected="{% if tipo_activo == 'AJU' %}true{% else %}false{% endif %}">Ajuste</button>{% endif %}
+      </div>
+      <div>
+        <label for="mov-insumo" style="margin-top:0">Insumo</label>
+        <select id="mov-insumo" name="insumo_id" required>
+          {% for i in insumos %}
+            <option value="{{ i.pk }}" data-stock="{{ i.stock_actual|unlocalize }}" data-unidad="{{ i.abreviatura }}" data-proveedor="{{ i.proveedor.nombre|default:'Sin proveedor' }}"{% if insumo_activo == i.pk|stringformat:'s' %} selected{% endif %}>{{ i.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="mov-cantidad" style="margin-top:0" data-etiqueta-cantidad>Cantidad recibida</label>
+        <div class="campo-icono">
+          <input id="mov-cantidad" name="cantidad" type="text" inputmode="decimal" required pattern="[0-9]+([.,][0-9]{1,3})?" title="Un número con hasta 3 decimales, por ejemplo 2,5" autocomplete="off">
+          <span class="fuerte" data-unidad></span>
+        </div>
+      </div>
+      <div data-solo="MER">
+        <label for="mov-motivo" style="margin-top:0">Motivo de la merma</label>
+        <select id="mov-motivo" name="motivo" required>
+          {% for clave, etiqueta in motivos_merma %}<option value="{{ clave }}">{{ etiqueta }}</option>{% endfor %}
+        </select>
+      </div>
+      <div data-solo="ENT">
+        <label for="mov-costo" style="margin-top:0">Costo por unidad en USD <span class="obs">(opcional, actualiza el costo)</span></label>
+        <input id="mov-costo" name="costo" type="number" step="0.0001" min="0" max="99999" inputmode="decimal">
+        <p class="hint" style="margin: 6px 0 0">Proveedor: <strong data-proveedor>—</strong></p>
+      </div>
+      <div>
+        <label for="mov-nota" style="margin-top:0">Nota <span class="obs">(opcional)</span></label>
+        <input id="mov-nota" name="nota" maxlength="200" placeholder="N.º de factura del proveedor, detalle de la pérdida…">
+      </div>
+      <p class="calculo" style="margin:0" data-previa aria-live="polite">Elige un insumo y la cantidad.</p>
+      <button class="btn grande bloque" type="submit" data-enviar-mov>Registrar entrada</button>
+    </form>
+
+    <section class="card lista-compra subir d5" aria-label="Lista de compra sugerida">
+      <div class="card-cabecera"><h2>Lista de compra</h2><strong>${{ total_compra|intcomma }}</strong></div>
+      {% for f in compra %}
+        <div class="fila">
+          <span><strong>{{ f.insumo.nombre }}</strong><small>{{ f.proveedor }}</small></span>
+          <span class="der">{{ f.cantidad|floatformat:"-3" }} {{ f.insumo.abreviatura }}<small>${{ f.costo_usd|intcomma }}</small></span>
+        </div>
+      {% empty %}
+        <p class="obs" style="margin:0">Nada por reponer: todos los insumos están sobre su punto de reposición.</p>
+      {% endfor %}
+      {% if compra %}<a class="btn secundario bloque" style="margin-top: 12px" href="{% url 'inventario:compra_csv' %}">{% include "_icono.html" with nombre="descargar" %}Exportar pedido por proveedor</a>{% endif %}
+    </section>
+
+    <section id="recetas" class="card costos subir d5" aria-label="Costo y margen por plato">
+      <h2>Costo y margen por plato</h2>
+      {% for c in costos %}
+        <div class="fila">
+          <span><strong>{{ c.producto.nombre }}</strong><small>Costo de receta ${{ c.costo_usd }} · precio ${{ c.precio_usd }}</small></span>
+          <strong style="color: {% if c.margen < 55 %}var(--naranja-tinta){% else %}var(--verde-800){% endif %}">{{ c.margen }}%</strong>
+        </div>
+      {% empty %}
+        <p class="obs" style="margin:0">Carga el costo de los insumos para ver el margen de cada plato.</p>
+      {% endfor %}
+    </section>
+
+    <section class="card subir d5" aria-label="Últimos movimientos">
+      <h2>Últimos movimientos</h2>
+      <div class="movs">
+        {% for m in movimientos %}
+          <div class="mov">
+            <span class="icono {{ m.tipo }}">{% if m.tipo == "ENT" %}+{% elif m.tipo == "AJU" %}={% elif m.tipo == "MER" %}×{% else %}−{% endif %}</span>
+            <div style="min-width: 0">
+              <strong>{{ m.get_tipo_display }} · {{ m.cantidad|floatformat:"-3" }} {{ m.insumo.abreviatura }} {{ m.insumo.nombre }}</strong>
+              <small>{{ m.nota|default:"" }}{% if m.usuario %} · {{ m.usuario.username }}{% endif %} · {{ m.creado_en|date:"d/m H:i" }}</small>
+            </div>
+          </div>
+        {% empty %}
+          <p class="obs" style="margin:0">Sin movimientos todavía.</p>
+        {% endfor %}
+      </div>
+    </section>
   </div>
-</section>
+</div>
 {% endblock %}

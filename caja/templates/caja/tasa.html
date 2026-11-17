@@ -1,27 +1,68 @@
 {% extends "base.html" %}
+{% load l10n %}
 {% block title %}Tasa de cambio{% endblock %}
+{% block subtitle %}Bolívares por cada dólar · la factura congela la tasa con la que se emite{% endblock %}
 {% block heading %}Tasa de cambio{% endblock %}
-{% block subtitle %}{% if vigente %}Vigente: 1 USD = {{ vigente.valor }} Bs.{% else %}Sin tasa activa{% endif %}{% endblock %}
 {% block content %}
-<section class="card">
-  <form method="post" action="{% url 'caja:guardar_tasa' %}">
-    {% csrf_token %}
-    <label>Nueva tasa (Bs. por 1 USD)</label>
-    <input name="valor" type="number" step="0.0001" min="0.0001" required>
-    <p><button class="btn" type="submit">Publicar tasa</button></p>
-  </form>
-  <table>
-    <thead><tr><th>Valor</th><th>Desde</th><th>Estado</th><th>Usuario</th></tr></thead>
-    <tbody>
-      {% for t in tasas %}
-        <tr>
-          <td>{{ t.valor }}</td>
-          <td>{{ t.vigente_desde|date:"d/m/Y H:i" }}</td>
-          <td>{% if t.activa %}Activa{% else %}Histórica{% endif %}</td>
-          <td>{{ t.creada_por }}</td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</section>
+<div class="split">
+  <div class="lateral" style="flex: 1 1 340px">
+    <article class="kpi oscuro subir d1">
+      <small>Tasa vigente</small>
+      {% if vigente %}
+        <strong>1 USD = {{ vigente.valor|floatformat:2 }} Bs</strong>
+        <span>Desde {{ vigente.vigente_desde|date:"d/m/Y H:i" }} · {{ vigente.creada_por.username }}</span>
+      {% else %}
+        <strong>Sin tasa</strong>
+        <span>Los meseros no pueden cargar platos hasta que publiques una.</span>
+      {% endif %}
+    </article>
+
+    {% if propuesta %}
+      <form class="card subir d2" method="post" action="{% url 'caja:guardar_tasa' %}" style="border: 2px solid var(--amarillo-700)">
+        {% csrf_token %}
+        <h2>¿Confirmas 1 USD = {{ propuesta }} Bs?</h2>
+        <p class="obs">Es un cambio grande respecto de la tasa vigente. Revisa que no haya un cero de más o de menos.</p>
+        <input type="hidden" name="valor" value="{{ propuesta|unlocalize }}">
+        <input type="hidden" name="confirmado" value="1">
+        <div class="stack">
+          <button class="btn amarillo" type="submit">Sí, publicar esta tasa</button>
+          <a class="btn secundario" href="{% url 'caja:tasa' %}">Corregir</a>
+        </div>
+      </form>
+    {% endif %}
+
+    <form class="card subir d2" method="post" action="{% url 'caja:guardar_tasa' %}">
+      {% csrf_token %}
+      <h2>Publicar nueva tasa</h2>
+      <label for="valor" style="margin-top:0">Bolívares por 1 USD</label>
+      <div class="monto-grande">
+        <span>Bs</span>
+        <input id="valor" name="valor" type="number" step="0.0001" min="0.0001" max="9999999" required inputmode="decimal" placeholder="{% if vigente %}{{ vigente.valor|floatformat:2 }}{% else %}0,00{% endif %}">
+      </div>
+      <p class="hint">Si cambia más de un 20 % respecto de la vigente, el sistema te pedirá confirmarla.</p>
+      <button class="btn bloque" type="submit">Publicar tasa</button>
+    </form>
+  </div>
+
+  <section class="card principal subir d3">
+    <h2>Historial</h2>
+    <div class="tabla-caja">
+      <table>
+        <thead><tr><th>Valor</th><th>Desde</th><th>Estado</th><th>Usuario</th></tr></thead>
+        <tbody>
+          {% for t in tasas %}
+            <tr>
+              <td class="num fuerte">{{ t.valor|floatformat:4 }}</td>
+              <td>{{ t.vigente_desde|date:"d/m/Y H:i" }}</td>
+              <td>{% if t.activa %}<span class="pill ok">Activa</span>{% else %}<span class="pill gris">Histórica</span>{% endif %}</td>
+              <td>{{ t.creada_por.username }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4" class="obs">Todavía no se ha publicado ninguna tasa.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
 {% endblock %}

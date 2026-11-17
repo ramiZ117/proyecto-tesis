@@ -1,36 +1,50 @@
-<section class="kds-grid">
-  {% for pedido in pedidos %}
-    <article class="ticket nivel-{{ pedido.nivel }}">
-      <h3>Mesa {{ pedido.mesa.numero }} · #{{ pedido.pk }}</h3>
-      <p class="muted">
-        Entró {{ pedido.desde|date:"H:i" }}
-        {% if pedido.pendiente_cocina %}
-          · <strong>{{ pedido.espera_min }} min</strong> en espera
-          {% if pedido.nivel == "critico" %}<span class="pill pill-crit">Crítico</span>
-          {% elif pedido.nivel == "demora" %}<span class="pill pill-warn">Demorado</span>{% endif %}
-        {% else %}
-          · todo listo, esperando al mesero
-        {% endif %}
-      </p>
-      {% for d in pedido.items_cocina %}
-        <div class="item">
-          <strong>{{ d.cantidad }} × {{ d.producto.nombre }}</strong>
-          <div>{{ d.get_estado_display }}</div>
-          {% if d.observaciones %}<div class="obs">{{ d.observaciones }}</div>{% endif %}
-          {% if d.estado == "PEN" or d.estado == "PRE" %}
-            <form method="post" action="{% url 'cocina:estado' d.pk %}">
-              {% csrf_token %}
-              {% if d.estado == "PEN" %}
-                <button class="btn warn" name="accion" value="preparar" type="submit">Preparar</button>
-              {% else %}
-                <button class="btn ok" name="accion" value="listo" type="submit">Listo para servir</button>
-              {% endif %}
-            </form>
-          {% endif %}
-        </div>
+<div class="kds-columnas" data-nuevos="{{ nuevos }}">
+  {% for col in columnas %}
+    <section class="kds-columna" aria-label="{{ col.titulo }}">
+      <div class="cab">
+        <h2><i class="punto" style="color: {% if col.clave == 'pen' %}var(--amarillo-700){% elif col.clave == 'prep' %}#3CC59B{% else %}#7FA8F5{% endif %}"></i>{{ col.titulo }}</h2>
+        <span class="cuenta">{{ col.pedidos|length }}</span>
+      </div>
+      {% for pedido in col.pedidos %}
+        <article class="ticket nivel-{{ pedido.nivel }}">
+          <div class="cab">
+            <div>
+              <h3>{% if pedido.mesa_id %}Mesa {{ pedido.mesa.numero }}{% else %}Llevar {{ pedido.codigo }}{% endif %}</h3>
+              <div class="sub">{% if pedido.cliente %}{{ pedido.cliente }} · {% endif %}{{ pedido.mesero.username }} · #{{ pedido.pk }}</div>
+            </div>
+            {% if pedido.pendiente_cocina %}
+              <span class="reloj" data-desde="{{ pedido.desde|date:'c' }}" title="Tiempo de espera">{% include "_icono.html" with nombre="reloj" grosor="2.4" %}<span data-reloj-texto>{{ pedido.espera_min }} min</span></span>
+            {% else %}
+              <span class="reloj">{% include "_icono.html" with nombre="check" grosor="2.4" %}Esperando al mesero</span>
+            {% endif %}
+          </div>
+          {% if pedido.notas %}<div class="ticket-nota">Comanda: {{ pedido.notas }}</div>{% endif %}
+          <ul>
+            {% for d in pedido.items_cocina %}
+              <li class="{% if d.estado == 'LIS' %}hecho{% endif %}">
+                <span class="cant">{{ d.cantidad }}×</span>
+                <div class="que">
+                  <strong>{{ d.producto.nombre }}</strong>
+                  {% if d.observaciones %}<div class="nota">Nota: {{ d.observaciones }}</div>{% endif %}
+                </div>
+                {% if d.estado == "PEN" or d.estado == "PRE" %}
+                  <form method="post" action="{% url 'cocina:estado' d.pk %}">
+                    {% csrf_token %}
+                    {% if estacion %}<input type="hidden" name="estacion" value="{{ estacion }}">{% endif %}
+                    {% if d.estado == "PEN" %}
+                      <button class="accion-kds empezar" name="accion" value="preparar" type="submit">Empezar</button>
+                    {% else %}
+                      <button class="accion-kds terminar" name="accion" value="listo" type="submit">Listo</button>
+                    {% endif %}
+                  </form>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </article>
+      {% empty %}
+        <div class="vacio">{{ col.vacio }}</div>
       {% endfor %}
-    </article>
-  {% empty %}
-    <p class="card">No hay pedidos en cola.</p>
+    </section>
   {% endfor %}
-</section>
+</div>

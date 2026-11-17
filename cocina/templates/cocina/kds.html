@@ -1,7 +1,39 @@
 {% extends "base.html" %}
-{% block title %}Cocina KDS{% endblock %}
-{% block heading %}Pantalla de cocina{% endblock %}
-{% block subtitle %}Orden de llegada · se actualiza sola cada 5 segundos{% endblock %}
+{% load static %}
+{% block title %}Cocina{% endblock %}
+{% block body_class %}modo-cocina{% endblock %}
+{% block encabezado %}
+<header class="kds-cab subir">
+  <div class="kds-marca">
+    <img src="{% static 'img/logo-el-amir.jpg' %}" alt="" width="48" height="48">
+    <div>
+      <h1>Cocina · El Amir</h1>
+      <div class="obs" style="color:#9DB3AC; display:flex; align-items:center; gap:6px">
+        <span class="vivo" style="width:8px;height:8px;border-radius:50%;background:#3CC59B;display:inline-block"></span>
+        En vivo · {{ request.user.username }} · <span data-reloj-pared>{% now "H:i:s" %}</span>
+      </div>
+    </div>
+  </div>
+  <div class="kds-controles">
+    <nav class="segmentos" aria-label="Estación">
+      {% for clave, nombre in estaciones %}
+        <a href="?{% if clave %}estacion={{ clave }}{% endif %}" class="{% if clave == estacion %}activo{% endif %}"{% if clave == estacion %} aria-current="true"{% endif %}>{{ nombre }}</a>
+      {% endfor %}
+    </nav>
+    <button class="btn-kds" type="button" data-sonido aria-pressed="true">{% include "_icono.html" with nombre="sonido" %}<span data-sonido-texto>Sonido activo</span></button>
+    {% if es_admin or es_mesero or es_cajero %}<a class="btn-kds" href="{% url 'inicio' %}">Volver</a>{% endif %}
+    <form method="post" action="{% url 'logout' %}" data-sin-parcial>
+      {% csrf_token %}
+      <button class="btn-kds" type="submit">{% include "_icono.html" with nombre="salir" %}Salir</button>
+    </form>
+  </div>
+</header>
+<div class="kds-leyenda">
+  <span><i style="background:#3CC59B"></i>A tiempo (menos de {{ minutos_alerta }} min)</span>
+  <span><i style="background:var(--amarillo-700)"></i>Demora ({{ minutos_alerta }} a {{ minutos_critico }} min)</span>
+  <span><i style="background:#F06B54"></i>Crítico (más de {{ minutos_critico }} min)</span>
+</div>
+{% endblock %}
 {% block content %}
-<div id="kds" data-refresco="{% url 'cocina:kds_parcial' %}">{% include "cocina/_tickets.html" %}</div>
+<div id="kds" data-refresco="{{ url_parcial }}" data-ahora="{% now 'c' %}">{% include "cocina/_tickets.html" %}</div>
 {% endblock %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}{% if pedido %}{{ pedido.etiqueta }}{% else %}Salón{% endif %}{% endblock %}
+{% block subtitle %}El mapa se actualiza solo cada 5 segundos{% endblock %}
+{% block heading %}Salón principal{% endblock %}
+{% block top_actions %}
+  <div class="leyenda" aria-label="Resumen del salón">
+    <span class="pill DIS"><i class="punto"></i>{{ conteo.DIS }} disponible{{ conteo.DIS|pluralize }}</span>
+    <span class="pill OCU"><i class="punto"></i>{{ conteo.OCU }} ocupada{{ conteo.OCU|pluralize }}</span>
+    <span class="pill FAC"><i class="punto"></i>{{ conteo.FAC }} por facturar</span>
+    <span class="pill LIM"><i class="punto"></i>{{ conteo.LIM }} por limpiar</span>
+  </div>
+{% endblock %}
+{% block content %}
+<div class="salon">
+  <section class="salon-mapa">
+    <div id="mapa" class="subir d1" data-refresco="{% url 'mesas:mapa_parcial' %}{% if pedido.mesa_id %}?sel={{ pedido.mesa_id }}{% endif %}">{% include "mesas/_mapa_grid.html" %}</div>
+
+    <section id="llevar" class="card subir d2" aria-label="Pedidos para llevar">
+      <div class="card-cabecera">
+        <h2 class="stack">{% include "_icono.html" with nombre="llevar" %} Para llevar</h2>
+        <form class="llevar-nuevo" method="post" action="{% url 'mesas:llevar_nuevo' %}">
+          {% csrf_token %}
+          <label class="oculto" for="cliente-llevar">Nombre del cliente</label>
+          <input id="cliente-llevar" name="cliente" maxlength="80" placeholder="Nombre del cliente" required>
+          <button class="btn punteado" type="submit">{% include "_icono.html" with nombre="mas" grosor="2.4" %}Nuevo pedido</button>
+        </form>
+      </div>
+      {% if llevar %}
+        <div class="llevar-grid">
+          {% for p in llevar %}
+            <a class="llevar-item{% if p.estado == 'LIS' or p.estado == 'ENT' %} listo{% endif %}{% if pedido and pedido.pk == p.pk %} sel{% endif %}" href="{% url 'mesas:comanda' p.pk %}">
+              <span class="stack" style="justify-content: space-between"><strong>{{ p.codigo }} · {{ p.cliente }}</strong>
+                <span class="pill {% if p.estado == 'LIS' or p.estado == 'ENT' %}ok{% elif p.estado == 'ABI' %}warn{% else %}ocu{% endif %}">{% if p.estado == 'LIS' %}Listo para entregar{% else %}{{ p.get_estado_display }}{% endif %}</span></span>
+              <span class="obs">{% for d in p.detalles.all %}{{ d.cantidad }} × {{ d.producto.nombre }}{% if not forloop.last %} · {% endif %}{% empty %}Sin platos todavía{% endfor %}</span>
+            </a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="vacio">No hay pedidos para llevar en curso.</p>
+      {% endif %}
+    </section>
+  </section>
+
+  <aside class="salon-panel subir d3" aria-label="Comanda">
+    {% if pedido %}
+      {% include "mesas/_comanda.html" %}
+    {% else %}
+      <div class="comanda">
+        <div class="panel-vacio">
+          {% include "_icono.html" with nombre="mesas" grosor="1.5" %}
+          <h2 style="margin:0">Elige una mesa</h2>
+          <p style="margin:0">Toca una mesa disponible para abrir su comanda, o una ocupada para seguir atendiéndola. Los pedidos para llevar se abren con el nombre del cliente.</p>
+        </div>
+      </div>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

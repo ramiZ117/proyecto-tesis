@@ -1,2 +1,16 @@
-Django>=5.1,<5.3
-psycopg[binary]>=3.2
+# Sistema web de Comida Árabe El Amir
+# Probado con Python 3.12 a 3.14. Instalación:
+#   python -m venv venv
+#   venv\Scripts\activate          (Windows)  |  source venv/bin/activate  (Linux)
+#   pip install -r requirements.txt
+#   python manage.py migrate
+#   python manage.py seed_restaurante
+#   python manage.py runserver
+#
+# Base de datos: SQLite (incluida en Python); no requiere instalar un motor aparte.
+
+Django==5.2.19
+asgiref==3.13.0
+sqlparse==0.6.1
+# Zona horaria America/Caracas en Windows (Linux la trae del sistema).
+tzdata==2026.6

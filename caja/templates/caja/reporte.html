@@ -1,19 +1,20 @@
 {% extends "base.html" %}
 {% block title %}Reporte del día{% endblock %}
+{% block subtitle %}{{ fecha|date:"l d/m/Y" }} · {% if consolidado %}todos los cajeros{% else %}solo tus cobros{% endif %}{% endblock %}
 {% block heading %}Reporte de ventas del día{% endblock %}
-{% block subtitle %}{{ fecha|date:"d/m/Y" }} · {% if consolidado %}todos los cajeros{% else %}solo tus cobros{% endif %}{% endblock %}
 {% block top_actions %}
   <div class="stack no-print">
     <form method="get" class="stack">
-      <input type="date" name="fecha" value="{{ fecha|date:'Y-m-d' }}">
-      <button class="btn secondary" type="submit">Ver</button>
+      <label class="oculto" for="fecha">Fecha</label>
+      <input id="fecha" type="date" name="fecha" value="{{ fecha|date:'Y-m-d' }}" max="{% now 'Y-m-d' %}" style="width:auto">
+      <button class="btn secundario" type="submit">Ver</button>
     </form>
-    <button class="btn secondary" type="button" onclick="window.print()">Imprimir</button>
-    <a class="btn secondary" href="?fecha={{ fecha|date:'Y-m-d' }}&formato=csv">Exportar CSV</a>
+    <button class="btn secundario" type="button" onclick="window.print()">{% include "_icono.html" with nombre="imprimir" %}Imprimir</button>
+    <a class="btn secundario" href="?fecha={{ fecha|date:'Y-m-d' }}&formato=csv">{% include "_icono.html" with nombre="descargar" %}CSV</a>
   </div>
 {% endblock %}
 {% block content %}
-<section class="card">
+<section class="card subir">
   {% include "caja/_desglose.html" %}
 </section>
 {% endblock %}

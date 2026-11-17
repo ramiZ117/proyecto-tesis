@@ -1,41 +1,48 @@
 {% extends "base.html" %}
 {% load humanize %}
 {% block title %}Caja{% endblock %}
+{% block subtitle %}{% if tasa %}Tasa vigente: 1 USD = {{ tasa.valor|floatformat:2 }} Bs{% else %}Sin tasa de cambio: regístrala antes de cobrar{% endif %}{% endblock %}
 {% block heading %}Cuentas abiertas{% endblock %}
-{% block subtitle %}{% if tasa %}Tasa vigente: 1 USD = {{ tasa.valor }} Bs.{% else %}Configura una tasa de cambio{% endif %}{% endblock %}
+{% block top_actions %}
+  <a class="btn secundario" href="{% url 'caja:tasa' %}">{% include "_icono.html" with nombre="tasa" %}Tasa</a>
+  <a class="btn secundario" href="{% url 'caja:cierre' %}">{% include "_icono.html" with nombre="cierre" %}Cierre de caja</a>
+{% endblock %}
 {% block content %}
 <section class="cuentas-grid">
   {% for c in cuentas_abiertas %}
-    <article class="ticket{% if c.solicitada %} nivel-solicitada{% endif %}">
-      <h3>Mesa {{ c.pedido.mesa.numero }}
-        {% if c.solicitada %}<span class="pill pill-info">Cuenta solicitada</span>{% endif %}
-      </h3>
-      <p class="muted">Pedido #{{ c.pedido.pk }} · {{ c.pedido.get_estado_display }} · Mesero {{ c.pedido.mesero.username }}</p>
-      {% for d in c.items %}
-        <div class="item">
-          {{ d.cantidad }} × {{ d.producto.nombre }}
-          <span class="muted">· Bs. {{ d.subtotal|intcomma }}</span>
-          {% if not d.enviado %}<span class="pill pill-warn">Sin enviar</span>{% endif %}
-          {% if d.observaciones %}<div class="obs">{{ d.observaciones }}</div>{% endif %}
-        </div>
-      {% empty %}
-        <p class="obs">Sin platillos.</p>
-      {% endfor %}
-      <p class="totals">Bs. {{ c.subtotal|intcomma }}</p>
-      {% if c.usd %}<p class="muted">≈ USD {{ c.usd|intcomma }}</p>{% endif %}
+    <article id="pedido-{{ c.pedido.pk }}" class="card cuenta alzar subir{% if c.solicitada %} pide latido{% endif %}">
+      <div class="stack" style="justify-content: space-between">
+        <h2 style="margin:0">{% if c.pedido.mesa_id %}Mesa {{ c.pedido.mesa.numero }}{% else %}Llevar {{ c.pedido.codigo }}{% endif %}</h2>
+        {% if c.factura %}<span class="pill info">Facturada</span>
+        {% elif c.solicitada %}<span class="pill FAC">{% if c.pedido.mesa_id %}Cuenta solicitada{% else %}Listo para cobrar{% endif %}</span>
+        {% elif c.sin_enviar %}<span class="pill warn">Sin enviar</span>
+        {% else %}<span class="pill ocu">En servicio</span>{% endif %}
+      </div>
+      <p class="obs" style="margin:0">{% if c.pedido.cliente %}{{ c.pedido.cliente }} · {% endif %}{{ c.platos }} plato{{ c.platos|pluralize }} · {{ c.pedido.mesero.username }} · pedido #{{ c.pedido.pk }}</p>
+      <div>
+        {% for d in c.items %}
+          <div class="item">
+            <span>{{ d.cantidad }} × {{ d.producto.nombre }}{% if not d.enviado %} <span class="pill warn">Sin enviar</span>{% endif %}{% if d.observaciones %}<span class="obs" style="display:block">{{ d.observaciones }}</span>{% endif %}</span>
+            <span class="num">Bs {{ d.subtotal|intcomma }}</span>
+          </div>
+        {% empty %}
+          <p class="obs">Sin platillos.</p>
+        {% endfor %}
+      </div>
+      <div class="saldo"><span class="fuerte">Total</span><span><strong style="font-size:22px">Bs {{ c.subtotal|intcomma }}</strong>{% if c.usd %} <span class="muted">· ${{ c.usd|intcomma }}</span>{% endif %}</span></div>
       {% if c.factura %}
-        <a class="btn" href="{% url 'caja:factura' c.factura.pk %}">Ver factura {{ c.factura.numero }}</a>
+        <a class="btn bloque" href="{% url 'caja:factura' c.factura.pk %}">Cobrar factura {{ c.factura.numero }}</a>
       {% elif c.items and not c.sin_enviar %}
         <form method="post" action="{% url 'caja:emitir' c.pedido.pk %}">
           {% csrf_token %}
-          <button class="btn" type="submit">Emitir factura</button>
+          <button class="btn bloque" type="submit">Emitir factura</button>
         </form>
       {% elif c.sin_enviar %}
-        <p class="obs">Hay platillos sin enviar a cocina; no se puede facturar todavía.</p>
+        <p class="obs" style="margin:0">Hay platillos sin enviar a cocina; no se puede facturar todavía.</p>
       {% endif %}
     </article>
   {% empty %}
-    <p class="card">No hay cuentas abiertas.</p>
+    <div class="vacio" style="grid-column: 1 / -1">No hay cuentas abiertas. Las mesas que pidan la cuenta aparecerán aquí primero.</div>
   {% endfor %}
 </section>
 {% endblock %}

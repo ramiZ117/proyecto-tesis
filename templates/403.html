@@ -1,7 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Sin permiso{% endblock %}
-{% block heading %}Sin permiso{% endblock %}
 {% block subtitle %}Este módulo no corresponde a tu rol{% endblock %}
+{% block heading %}Sin permiso{% endblock %}
 {% block content %}
-<p class="card">Pide a un administrador que te asigne al grupo correcto: Meseros, Cocina o Caja.</p>
+<div class="card panel-vacio subir">
+  {% include "_icono.html" with nombre="candado" grosor="1.5" %}
+  <p style="margin:0">Pide a un administrador que te asigne al grupo correcto: Meseros, Cocina o Caja.</p>
+  <a class="btn" href="{% url 'inicio' %}">Ir al inicio</a>
+</div>
 {% endblock %}

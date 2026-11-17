@@ -1,29 +1,70 @@
-{% load static %}
-<!DOCTYPE html>
+{% load static %}<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ingresar · Restó Tesis</title>
+  <meta name="theme-color" content="#0F3D2A">
+  <title>Iniciar sesión · El Amir</title>
+  <link rel="icon" href="{% static 'img/logo-el-amir.jpg' %}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Reem+Kufi:wght@600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'css/app.css' %}">
 </head>
-<body class="auth-body">
-  <section class="auth-card">
-    <h1 class="brand">Restó Tesis</h1>
-    <p class="muted">Sistema transaccional de restaurante</p>
-    <form method="post">
-      {% csrf_token %}
-      {% if form.errors %}
-        <p class="flash"><span class="err" style="display:block;padding:10px 14px;border-radius:10px">
-          {% if form.non_field_errors %}{{ form.non_field_errors.0 }}{% else %}Usuario o contraseña incorrectos.{% endif %}
-        </span></p>
-      {% endif %}
-      <label for="id_username">Usuario</label>
-      <input id="id_username" name="username" required autofocus autocomplete="username">
-      <label for="id_password">Contraseña</label>
-      <input id="id_password" type="password" name="password" required autocomplete="current-password">
-      <p><button class="btn" type="submit">Entrar</button></p>
-    </form>
-  </section>
+<body>
+  <div class="auth">
+    <section class="auth-arte">
+      <svg class="patron" aria-hidden="true">
+        <defs>
+          <pattern id="estrellas" width="96" height="96" patternUnits="userSpaceOnUse">
+            <g fill="none" stroke="#F2CF55" stroke-width="1.4">
+              <rect x="28" y="28" width="40" height="40"/>
+              <rect x="28" y="28" width="40" height="40" transform="rotate(45 48 48)"/>
+              <circle cx="48" cy="48" r="9"/>
+              <path d="M0 48h14M82 48h14M48 0v14M48 82v14"/>
+            </g>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#estrellas)"/>
+      </svg>
+      <img class="auth-logo" src="{% static 'img/logo-el-amir.jpg' %}" alt="Comida Árabe El Amir, desde 1995" width="150" height="150">
+      <div class="subir d1">
+        <h1>Del salón a la cocina y a la caja, sin papel.</h1>
+        <p>Comandas, monitor de cocina, cobro en bolívares y dólares, e inventario por receta en un solo sistema.</p>
+      </div>
+      <div class="auth-etiquetas">
+        <span>Funciona en la red del local</span>
+        <span>Tablet, PC y teléfono</span>
+      </div>
+    </section>
+
+    <section class="auth-form">
+      <form method="post">
+        {% csrf_token %}
+        <div class="subir d1" style="margin-bottom: 8px">
+          <h2>Iniciar sesión</h2>
+          <p class="muted" style="margin: 6px 0 0">Cada rol entra directo a su pantalla.</p>
+        </div>
+        {% if form.errors %}
+          <ul class="flash" role="alert" style="margin: 8px 0 0">
+            <li class="err">{% if form.non_field_errors %}{{ form.non_field_errors.0 }}{% else %}Usuario o contraseña incorrectos.{% endif %}</li>
+          </ul>
+        {% endif %}
+        <label for="id_username" class="subir d2">Usuario</label>
+        <div class="campo-icono subir d2">
+          {% include "_icono.html" with nombre="persona" %}
+          <input id="id_username" name="username" required autofocus autocomplete="username" maxlength="150" value="{{ form.username.value|default:'' }}">
+        </div>
+        <label for="id_password" class="subir d3">Contraseña</label>
+        <div class="campo-icono subir d3">
+          {% include "_icono.html" with nombre="candado" %}
+          <input id="id_password" type="password" name="password" required autocomplete="current-password">
+          <button class="btn sm secundario" type="button" onclick="var c=document.getElementById('id_password');var v=c.type==='password';c.type=v?'text':'password';this.textContent=v?'Ocultar':'Ver';this.setAttribute('aria-pressed',v)" aria-pressed="false" aria-controls="id_password">Ver</button>
+        </div>
+        <button class="btn grande bloque subir d4" type="submit">Entrar {% include "_icono.html" with nombre="flecha" grosor="2.4" %}</button>
+        <p class="obs" style="text-align: center; margin-top: 14px">Tras 5 intentos fallidos el acceso se bloquea por 5 minutos.</p>
+      </form>
+    </section>
+  </div>
 </body>
 </html>
