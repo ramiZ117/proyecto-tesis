@@ -1,0 +1,1 @@
+{% if p.foto %}<img src="{{ p.foto.url }}" alt="{{ p.nombre }}" loading="lazy" decoding="async" width="800" height="600">{% else %}<span class="foto-vacia" aria-hidden="true"><span>{{ p.nombre|slice:":1" }}</span></span>{% endif %}

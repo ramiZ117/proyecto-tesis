@@ -13,7 +13,7 @@
               <div class="sub">{% if pedido.cliente %}{{ pedido.cliente }} · {% endif %}{{ pedido.mesero.username }} · #{{ pedido.pk }}</div>
             </div>
             {% if pedido.pendiente_cocina %}
-              <span class="reloj" data-desde="{{ pedido.desde|date:'c' }}" title="Tiempo de espera">{% include "_icono.html" with nombre="reloj" grosor="2.4" %}<span data-reloj-texto>{{ pedido.espera_min }} min</span></span>
+              <span class="reloj" data-desde="{{ pedido.desde|date:'c' }}" title="Tiempo de espera">{% include "_icono.html" with nombre="reloj" grosor="2.4" %}<span data-reloj-texto></span></span>
             {% else %}
               <span class="reloj">{% include "_icono.html" with nombre="check" grosor="2.4" %}Esperando al mesero</span>
             {% endif %}
@@ -27,20 +27,21 @@
                   <strong>{{ d.producto.nombre }}</strong>
                   {% if d.observaciones %}<div class="nota">Nota: {{ d.observaciones }}</div>{% endif %}
                 </div>
-                {% if d.estado == "PEN" or d.estado == "PRE" %}
-                  <form method="post" action="{% url 'cocina:estado' d.pk %}">
-                    {% csrf_token %}
-                    {% if estacion %}<input type="hidden" name="estacion" value="{{ estacion }}">{% endif %}
-                    {% if d.estado == "PEN" %}
-                      <button class="accion-kds empezar" name="accion" value="preparar" type="submit">Empezar</button>
-                    {% else %}
-                      <button class="accion-kds terminar" name="accion" value="listo" type="submit">Listo</button>
-                    {% endif %}
-                  </form>
-                {% endif %}
+                <span class="estado-plato {{ d.estado }}">{% if d.estado == "PEN" %}Nuevo{% elif d.estado == "PRE" %}En marcha{% else %}Listo{% endif %}</span>
               </li>
             {% endfor %}
           </ul>
+          {% if pedido.por_empezar or pedido.en_marcha %}
+            <form method="post" action="{% url 'cocina:avanzar' pedido.pk %}">
+              {% csrf_token %}
+              {% if estacion %}<input type="hidden" name="estacion" value="{{ estacion }}">{% endif %}
+              {% if pedido.por_empezar %}
+                <button class="accion-kds empezar bloque" name="accion" value="empezar" type="submit">Empezar {% if pedido.por_empezar > 1 %}({{ pedido.por_empezar }} platos){% endif %}</button>
+              {% else %}
+                <button class="accion-kds terminar bloque" name="accion" value="listo" type="submit">Todo listo</button>
+              {% endif %}
+            </form>
+          {% endif %}
         </article>
       {% empty %}
         <div class="vacio">{{ col.vacio }}</div>

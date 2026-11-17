@@ -19,7 +19,7 @@
               <span class="stack" style="justify-content: flex-end">
                 <a class="btn sm secundario" href="{% url 'usuario_editar' fila.usuario.pk %}">Editar</a>
                 {% if fila.usuario.pk != request.user.pk %}
-                  <form method="post" action="{% url 'usuario_alternar' fila.usuario.pk %}" onsubmit="return confirm('¿{% if fila.usuario.is_active %}Desactivar{% else %}Activar{% endif %} a {{ fila.usuario.username }}?');">
+                  <form method="post" action="{% url 'usuario_alternar' fila.usuario.pk %}" data-confirmar="¿{% if fila.usuario.is_active %}Desactivar{% else %}Activar{% endif %} a {{ fila.usuario.username }}?" data-confirmar-peligro>
                     {% csrf_token %}
                     <button class="btn sm {% if fila.usuario.is_active %}peligro{% else %}secundario{% endif %}" type="submit">{% if fila.usuario.is_active %}Desactivar{% else %}Activar{% endif %}</button>
                   </form>

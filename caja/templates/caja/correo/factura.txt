@@ -1,0 +1,20 @@
+{% load humanize %}{{ local }}{% if rif %} · RIF {{ rif }}{% endif %}
+{{ direccion }} · {{ telefono }}
+
+FACTURA {{ factura.numero }} · {{ factura.emitida_en|date:"d/m/Y H:i" }}
+{% if factura.personalizada %}Cliente: {{ factura.cliente_nombre }} · {{ factura.cliente_documento }}
+Dirección: {{ factura.cliente_direccion }}{% if factura.cliente_telefono %} · Tel. {{ factura.cliente_telefono }}{% endif %}{% else %}Cliente: Consumidor final{% endif %}
+
+{% for d in detalles %}{{ d.cantidad }} x {{ d.producto.nombre }} ..... Bs {{ d.subtotal|intcomma }}
+{% endfor %}{% if factura.descuento_local %}Descuento ({{ factura.descuento_motivo }}): -Bs {{ factura.descuento_local|intcomma }}
+{% endif %}Base imponible: Bs {{ factura.base_imponible_local|intcomma }}
+IVA ({{ factura.iva_porcentaje|floatformat:0 }} %): Bs {{ factura.iva_local|intcomma }}
+Total: Bs {{ factura.total_local|intcomma }} (${{ factura.total_usd|intcomma }}){% if factura.igtf_local %}
+IGTF por pago en divisas: Bs {{ factura.igtf_local|intcomma }}
+Total pagado: Bs {{ factura.total_con_igtf_local|intcomma }}{% endif %}
+
+Pagos:{% for p in factura.pagos.all %}
+- {{ p.get_metodo_display }}{% if p.referencia %} ref. {{ p.referencia }}{% endif %}: Bs {{ p.monto_local|intcomma }}{% endfor %}
+
+Tasa BCV aplicada: {{ factura.tasa_cambio|floatformat:2 }} Bs por USD.
+¡Gracias por tu visita!

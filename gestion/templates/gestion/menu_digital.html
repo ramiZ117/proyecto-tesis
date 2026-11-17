@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Menú digital{% endblock %}
+{% block subtitle %}Los clientes lo abren con el QR o el enlace, sin registrarse{% endblock %}
+{% block heading %}Menú digital y QR{% endblock %}
+{% block top_actions %}
+  <a class="btn secundario" href="{{ enlace }}" target="_blank" rel="noopener">{% include "_icono.html" with nombre="enlace" %}Abrir el menú</a>
+  <button class="btn" type="button" onclick="window.print()">{% include "_icono.html" with nombre="imprimir" %}Imprimir QR</button>
+{% endblock %}
+{% block content %}
+<div class="grid-auto no-print" style="--min: 260px; margin-bottom: 18px">
+  <article class="kpi oscuro"><small>Enlace del menú</small><strong style="font-size: 16px; word-break: break-all">{{ enlace }}</strong>
+    <span>{% if url_configurada %}Dirección fija (MENU_URL_PUBLICA){% else %}Tomada de esta pantalla: define MENU_URL_PUBLICA en .env con la IP del servidor{% endif %}</span></article>
+  <article class="kpi"><small>Asistente</small><strong style="font-size: 18px">{{ ia.nombre }}</strong>
+    <span>{% if ia.clave == "local" %}Sin clave de IA: responde con la carta. Agrega GEMINI_API_KEY o GROQ_API_KEY en .env para la IA.{% else %}Modelo {{ ia.modelo }}{% endif %}</span></article>
+  <article class="kpi"><small>Platos en el menú</small><strong>{{ platos }}</strong>
+    <span>{% if sin_foto %}{{ sin_foto }} sin foto: <a href="{% url 'gestion:carta' %}">agrégalas en Carta</a>{% else %}Todos con foto{% endif %}</span></article>
+</div>
+
+<section class="hoja-qr">
+  <article class="qr-tarjeta qr-general">
+    <div class="qr">{{ qr_general|safe }}</div>
+    <div><strong>Menú de El Amir</strong><span>Escanea para ver la carta con fotos y nuestro asistente</span></div>
+  </article>
+  {% for item in mesas_qr %}
+    <article class="qr-tarjeta">
+      <div class="qr">{{ item.svg|safe }}</div>
+      <div><strong>Mesa {{ item.mesa.numero }}</strong><span>Escanea para ver el menú</span></div>
+    </article>
+  {% endfor %}
+</section>
+{% endblock %}

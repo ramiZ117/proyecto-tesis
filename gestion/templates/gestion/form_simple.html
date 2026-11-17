@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ titulo }}{% endblock %}
+{% block subtitle %}{{ subtitulo }}{% endblock %}
+{% block heading %}{{ titulo }}{% endblock %}
+{% block top_actions %}<a class="btn secundario" href="{{ volver }}">← Volver</a>{% endblock %}
+{% block content %}
+<section class="card subir" style="max-width: 720px">
+  <form method="post">
+    {% csrf_token %}
+    {% for e in form.non_field_errors %}<p class="error-campo" role="alert">{{ e }}</p>{% endfor %}
+    <div class="grid-auto" style="--min: 240px; gap: 0 16px">
+      {% for campo in form %}{% if campo.field.widget.input_type != "checkbox" %}{% include "gestion/_campo.html" %}{% endif %}{% endfor %}
+    </div>
+    <div class="interruptores">
+      {% for campo in form %}{% if campo.field.widget.input_type == "checkbox" %}{% include "gestion/_campo.html" %}{% endif %}{% endfor %}
+    </div>
+    <p class="stack" style="margin: 18px 0 0">
+      <button class="btn" type="submit">Guardar</button>
+      <a class="btn secundario" href="{{ volver }}">Cancelar</a>
+    </p>
+  </form>
+</section>
+{% endblock %}

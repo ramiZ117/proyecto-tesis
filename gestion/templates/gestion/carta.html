@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Carta y recetas{% endblock %}
+{% block subtitle %}{{ total_platos }} plato{{ total_platos|pluralize }}{% if sin_foto %} · {{ sin_foto }} sin foto{% endif %} · lo que se marca aquí es lo que ven los meseros y el menú digital{% endblock %}
+{% block heading %}Carta y recetas{% endblock %}
+{% block top_actions %}
+  <div class="campo-icono" style="min-width: 220px">
+    {% include "_icono.html" with nombre="buscar" %}
+    <label class="oculto" for="buscar-plato">Buscar plato</label>
+    <input id="buscar-plato" type="search" placeholder="Buscar plato" data-filtro-texto="carta-admin" autocomplete="off">
+  </div>
+  <a class="btn secundario" href="{% url 'gestion:categoria_nueva' %}">{% include "_icono.html" with nombre="mas" grosor="2.4" %}Categoría</a>
+  <a class="btn" href="{% url 'gestion:plato_nuevo' %}">{% include "_icono.html" with nombre="mas" grosor="2.4" %}Nuevo plato</a>
+{% endblock %}
+{% block content %}
+{% for c in categorias %}
+  <section id="cat-{{ c.pk }}" class="pila subir" style="margin-bottom: 24px">
+    <div class="card-cabecera" style="margin: 0">
+      <h2 class="stack" style="margin:0; font-size: 20px">{{ c.nombre }}
+        <span class="pill gris">{{ c.get_estacion_display }}</span>
+        {% if not c.activa %}<span class="pill crit">Oculta</span>{% endif %}
+      </h2>
+      <a class="btn sm secundario" href="{% url 'gestion:categoria' c.pk %}">{% include "_icono.html" with nombre="editar" %}Editar categoría</a>
+    </div>
+    <div class="grid-auto" style="--min: 250px">
+      {% for p in c.productos.all %}
+        <article class="card tarjeta-plato alzar{% if not p.disponible %} apagado{% endif %}" data-filtrable="carta-admin" data-texto="{{ p.nombre }} {{ c.nombre }}">
+          <a class="tarjeta-foto" href="{% url 'gestion:plato' p.pk %}" aria-label="Editar {{ p.nombre }}">
+            {% if p.foto %}<img src="{{ p.foto.url }}" alt="" loading="lazy">{% else %}<span class="sin-foto">{% include "_icono.html" with nombre="foto" grosor="1.5" %}Sin foto</span>{% endif %}
+          </a>
+          <div class="tarjeta-cuerpo">
+            <div class="stack" style="justify-content: space-between; align-items: baseline">
+              <strong>{{ p.nombre }}</strong><strong class="num" style="color: var(--verde-800)">${{ p.precio_usd }}</strong>
+            </div>
+            <div class="stack" style="gap: 6px">
+              {% if not p.disponible %}<span class="pill gris">Fuera de carta</span>{% elif p.porciones == 0 %}<span class="pill crit">Agotado</span>{% elif p.porciones is not None and p.porciones <= 5 %}<span class="pill warn">Quedan {{ p.porciones }}</span>{% endif %}
+              {% for e in p.etiquetas %}<span class="pill {% if e == 'Recomendado' %}warn{% elif e == 'Vegetariano' %}ok{% elif e == 'Picante' %}crit{% else %}info{% endif %}">{{ e }}</span>{% endfor %}
+            </div>
+            <span class="obs">{% if p.margen is not None %}Costo ${{ p.costo }} · margen {{ p.margen }}%{% else %}Sin receta: no descuenta inventario{% endif %}</span>
+            <div class="stack" style="margin-top: auto">
+              <a class="btn sm" href="{% url 'gestion:plato' p.pk %}">{% include "_icono.html" with nombre="editar" %}Editar</a>
+              <form method="post" action="{% url 'gestion:plato_disponible' p.pk %}">
+                {% csrf_token %}
+                <button class="btn sm {% if p.disponible %}secundario{% else %}amarillo{% endif %}" type="submit">{% if p.disponible %}Quitar de la carta{% else %}Volver a la carta{% endif %}</button>
+              </form>
+            </div>
+          </div>
+        </article>
+      {% empty %}
+        <p class="vacio" style="grid-column: 1 / -1">Sin platos en esta categoría.</p>
+      {% endfor %}
+    </div>
+  </section>
+{% empty %}
+  <div class="vacio">Crea una categoría para empezar la carta.</div>
+{% endfor %}
+{% endblock %}

@@ -4,6 +4,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.test import override_settings
 from django.utils import timezone
 
 from caja.models import CierreCaja, Devolucion, Factura, Pago, TasaCambio
@@ -84,6 +85,8 @@ class FacturacionTests(DatosBase):
             f.anular("Error")
 
 
+# Pruebas anteriores al IGTF: verifican conversión, vuelto y cierre sin el 3 % (el IGTF tiene sus propias pruebas).
+@override_settings(IGTF_METODOS=[])
 class PagosTests(DatosBase):
     """RF-05: pagos totales o divididos con efectivo, pago móvil, divisa y tarjeta."""
 
@@ -92,7 +95,7 @@ class PagosTests(DatosBase):
         return Factura.emitir_desde_pedido(pedido, self.cajero)
 
     def test_los_metodos_disponibles_son_los_del_requisito(self):
-        self.assertEqual(sorted(Pago.Metodo.values), sorted(["EFE", "PMO", "DIV", "TAR"]))
+        self.assertEqual(sorted(Pago.Metodo.values), sorted(["EFE", "PMO", "DIV", "TAR", "BIN", "ZIN"]))
 
     def test_pago_total_en_efectivo_cierra_cuenta_y_deja_la_mesa_por_limpiar(self):
         f = self.factura()
@@ -175,6 +178,8 @@ class PagosTests(DatosBase):
         self.assertEqual(r.context["cuota_usd"], Decimal("7.50"))
 
 
+# Pruebas anteriores al IGTF: verifican conversión, vuelto y cierre sin el 3 % (el IGTF tiene sus propias pruebas).
+@override_settings(IGTF_METODOS=[])
 class CierreDeCajaTests(DatosBase):
     """RF-05: cierre y reporte de caja diario."""
 
@@ -275,6 +280,8 @@ class CierreDeCajaTests(DatosBase):
         self.assertEqual(cierre.cantidad_facturas, 0)
 
 
+# Pruebas anteriores al IGTF: verifican conversión, vuelto y cierre sin el 3 % (el IGTF tiene sus propias pruebas).
+@override_settings(IGTF_METODOS=[])
 class DevolucionTests(DatosBase):
     """Anular una factura con pagos: se devuelve el dinero y la caja lo refleja."""
 

@@ -21,7 +21,8 @@ class RespaldoTests(SimpleTestCase):
     def respaldar(self, **opciones):
         salida = StringIO()
         bases = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": self.base}}
-        with override_settings(DATABASES=bases, RESPALDOS_DIR=self.carpeta / "respaldos", RESPALDOS_CONSERVAR=30):
+        with override_settings(DATABASES=bases, RESPALDOS_DIR=self.carpeta / "respaldos", RESPALDOS_CONSERVAR=30,
+                               MEDIA_ROOT=self.carpeta / "media"):
             call_command("respaldar", stdout=salida, **opciones)
         return salida.getvalue()
 
@@ -32,6 +33,18 @@ class RespaldoTests(SimpleTestCase):
         self.assertEqual(len(copias), 1)
         with closing(sqlite3.connect(copias[0])) as c:
             self.assertEqual(c.execute("select x from t").fetchone()[0], 42)
+
+    def test_incluye_las_fotos_de_los_platos(self):
+        import zipfile
+
+        (self.carpeta / "media" / "platos").mkdir(parents=True)
+        (self.carpeta / "media" / "platos" / "tabule.jpg").write_bytes(b"foto")
+        texto = self.respaldar()
+        self.assertIn("Fotos de los platos", texto)
+        zips = list((self.carpeta / "respaldos").glob("*_fotos.zip"))
+        self.assertEqual(len(zips), 1)
+        with zipfile.ZipFile(zips[0]) as z:
+            self.assertIn("platos/tabule.jpg", z.namelist())
 
     def test_conserva_solo_los_mas_recientes(self):
         destino = self.carpeta / "respaldos"

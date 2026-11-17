@@ -1,16 +1,34 @@
+import json
 from decimal import Decimal
+from pathlib import Path
 
+from django.conf import settings
 from django.contrib.auth.models import Group, User
+from django.core.files import File
 from django.core.management.base import BaseCommand
+from django.utils.text import slugify
 
 from caja.models import TasaCambio
 from config.permisos import GRUPO_ADMIN, GRUPO_CAJA, GRUPO_COCINA, GRUPO_MESERO
-from inventario.models import Categoria, Insumo, Producto, Proveedor, Receta
+from inventario.models import Categoria, Insumo, Producto, Promocion, PromocionItem, Proveedor, Receta
 from mesas.models import Mesa
 
 CLAVE_DEMO = "tesis1234"
 TASA_USD_A_LOCAL = Decimal("40.0000")
 USUARIOS_ANTIGUOS = ("mesero", "cocinero", "cajero")
+
+
+# Personalizaciones por categoría y minutos de preparación (por plato o por categoría).
+OPCIONES = {
+    "Shawarmas": ["Sin vegetales", "Sin cebolla", "Sin tomate", "Sin salsa de ajo", "Extra salsa", "Bien tostado"],
+    "Platos": ["Sin cebolla", "Salsa aparte", "Sin pan árabe", "Bien cocido"],
+    "Entradas frías": ["Sin aceite de oliva", "Pan árabe extra"],
+    "Bebidas": ["Sin azúcar", "Poca azúcar", "Sin hielo"],
+}
+MINUTOS = {
+    "Shawarmas": 8, "Platos": 15, "Entradas frías": 5, "Postres": 3, "Bebidas": 2,
+    "Plato mixto árabe": 18, "Kibbe frito (4 und)": 12, "Falafel (6 und)": 10, "Refresco": 1,
+}
 
 
 class Command(BaseCommand):
@@ -78,6 +96,7 @@ class Command(BaseCommand):
         proveedores = self._proveedores()
         insumos = self._insumos(proveedores)
         self._carta(insumos)
+        self._promociones()
         self.stdout.write(self.style.SUCCESS("Carga inicial lista. Usuarios: mesero1, chef1, cajero1 y admin."))
 
     # ---- salón -------------------------------------------------------------------
@@ -138,6 +157,7 @@ class Command(BaseCommand):
             ("Azúcar", G.OTROS, U.KILOGRAMO, "10", "2", "4", "20", "1.10", "Mercado de Puerto La Cruz"),
             ("Té negro en hojas", G.BEBIDAS, U.KILOGRAMO, "1.5", "0.3", "0.5", "3", "14.00", "Distribuidora Damasco"),
             ("Café árabe con cardamomo", G.BEBIDAS, U.KILOGRAMO, "1.2", "0.3", "0.5", "3", "16.00", "Distribuidora Damasco"),
+            ("Refresco en lata", G.BEBIDAS, U.UNIDAD, "48", "12", "24", "96", "0.70", "Distribuidora Damasco"),
         ]
         insumos = {}
         for nombre, grupo, unidad, stock, minimo, rep, maximo, costo, prov in datos:
@@ -205,16 +225,80 @@ class Command(BaseCommand):
              [("Limón", "0.120"), ("Hierbabuena", "0.008"), ("Azúcar", "0.030")]),
             ("Bebidas", "Ayran", "2.00", "Bebida de yogur salada.",
              [("Yogur natural", "0.250")]),
+            ("Bebidas", "Refresco", "1.50", "En lata, bien frío. Pregunta por los sabores del día.",
+             [("Refresco en lata", "1")]),
         ]
-        vigentes = []
+        veg = {"vegetariano": True}
+        veg_sg = {"vegetariano": True, "sin_gluten": True}
+        atributos = {
+            "Shawarma mixto": {"destacado": True},
+            "Plato mixto árabe": {"destacado": True},
+            "Falafel (6 und)": {"destacado": True, **veg},
+            "Baklava": {"destacado": True, **veg},
+            "Shawarma de falafel": veg, "Hummus con pan árabe": veg, "Tabule": veg, "Knafeh": veg,
+            "Babaganoush": veg_sg, "Hojas de parra (6 und)": veg_sg,
+            "Kafta a la parrilla": {"picante": True},
+            "Té árabe": veg_sg, "Café árabe": veg_sg, "Limonada con hierbabuena": veg_sg, "Ayran": veg_sg, "Refresco": veg_sg,
+        }
+        fotos = self._fotos_semilla()
+        vigentes, con_foto = [], 0
         for cat, nombre, usd, descripcion, receta in carta:
+            marcas = {"destacado": False, "vegetariano": False, "picante": False, "sin_gluten": False, **atributos.get(nombre, {})}
             prod, _ = Producto.objects.update_or_create(
                 categoria=categorias[cat], nombre=nombre,
-                defaults={"descripcion": descripcion, "precio_usd": Decimal(usd), "disponible": True},
+                defaults={"descripcion": descripcion, "precio_usd": Decimal(usd), "disponible": True, **marcas},
             )
+            if not prod.opciones:  # no pisa lo que el administrador haya cambiado
+                prod.opciones = "\n".join(OPCIONES.get(cat, []))
+                prod.minutos_preparacion = MINUTOS.get(nombre, MINUTOS.get(cat, 10))
+                prod.save(update_fields=["opciones", "minutos_preparacion"])
             Receta.objects.filter(producto=prod).exclude(insumo__nombre__in=[n for n, _ in receta]).delete()
             for insumo_nombre, cantidad in receta:
                 Receta.objects.update_or_create(producto=prod, insumo=i[insumo_nombre], defaults={"cantidad": Decimal(cantidad)})
+            # Foto de ejemplo con licencia libre, solo si el plato todavía no tiene una propia.
+            semilla = fotos.get(slugify(nombre))
+            if semilla and not prod.foto:
+                with open(semilla["ruta"], "rb") as archivo:
+                    prod.foto.save(f"{slugify(nombre)}.jpg", File(archivo), save=False)
+                prod.foto_credito = semilla["credito"]
+                prod.save(update_fields=["foto", "foto_credito"])
+            con_foto += bool(prod.foto)
             vigentes.append(prod.pk)
         Producto.objects.exclude(pk__in=vigentes).update(disponible=False)
-        self.stdout.write(f"  Carta árabe: {len(carta)} platos en {len(categorias)} categorías, con recetas.")
+        self.stdout.write(f"  Carta árabe: {len(carta)} platos en {len(categorias)} categorías, con recetas ({con_foto} con foto).")
+
+    def _promociones(self):
+        """Combos de ejemplo. Solo se crean si no existen: el administrador puede cambiarlos sin que se pisen."""
+        combos = [
+            ("Dúo shawarma", "14.00", "Dos shawarmas mixtos y un refresco para compartir.",
+             [("Shawarma mixto", 2), ("Refresco", 1)], 1),
+            ("Merienda vegetariana", "10.00", "Falafel, hummus con pan árabe y limonada.",
+             [("Falafel (6 und)", 1), ("Hummus con pan árabe", 1), ("Limonada con hierbabuena", 1)], 2),
+            ("Mesa familiar", "24.00", "Plato mixto árabe, hummus, tabule y cuatro tés árabes.",
+             [("Plato mixto árabe", 1), ("Hummus con pan árabe", 1), ("Tabule", 1), ("Té árabe", 4)], 3),
+        ]
+        creadas = 0
+        for nombre, usd, descripcion, items, orden in combos:
+            promo, creada = Promocion.objects.get_or_create(
+                nombre=nombre, defaults={"precio_usd": Decimal(usd), "descripcion": descripcion, "orden": orden}
+            )
+            if creada:
+                creadas += 1
+                for producto, cantidad in items:
+                    PromocionItem.objects.create(
+                        promocion=promo, producto=Producto.objects.get(nombre=producto, disponible=True), cantidad=cantidad
+                    )
+        self.stdout.write(f"  Promociones: {Promocion.objects.count()} ({creadas} nuevas).")
+
+    @staticmethod
+    def _fotos_semilla() -> dict:
+        """Fotos de ejemplo de Wikimedia Commons (licencia libre) incluidas en inventario/fotos_semilla."""
+        carpeta = Path(settings.BASE_DIR) / "inventario" / "fotos_semilla"
+        creditos_archivo = carpeta / "creditos.json"
+        if not creditos_archivo.exists():
+            return {}
+        creditos = json.loads(creditos_archivo.read_text(encoding="utf-8"))
+        return {
+            slug: {"ruta": carpeta / f"{slug}.jpg", "credito": f"{c['autor']} · {c['licencia']} · Wikimedia Commons"[:200]}
+            for slug, c in creditos.items() if (carpeta / f"{slug}.jpg").exists()
+        }

@@ -8,6 +8,7 @@ Programarlo a diario: Programador de tareas de Windows o `cron` en Linux (ver do
 """
 
 import logging
+import shutil
 import sqlite3
 from contextlib import closing
 from datetime import datetime
@@ -50,13 +51,22 @@ class Command(BaseCommand):
             archivo.unlink(missing_ok=True)
             raise CommandError(f"La copia no pasó la verificación de integridad: {resultado}")
 
+        # Las fotos de los platos viven fuera de la base: van en un .zip con la misma fecha.
+        fotos = None
+        media = Path(settings.MEDIA_ROOT)
+        if media.exists() and any(p.is_file() for p in media.rglob("*")):
+            fotos = Path(shutil.make_archive(str(archivo.with_suffix("")) + "_fotos", "zip", root_dir=media))
+
         respaldos = sorted(destino.glob("el_amir_*.sqlite3"))
         borrados = respaldos[:-conservar] if len(respaldos) > conservar else []
         for viejo in borrados:
             viejo.unlink(missing_ok=True)
+            Path(str(viejo.with_suffix("")) + "_fotos.zip").unlink(missing_ok=True)
 
         tamano = archivo.stat().st_size / 1024
         registro.info("Respaldo creado: %s (%.0f KB)", archivo.name, tamano)
         self.stdout.write(self.style.SUCCESS(f"Respaldo creado y verificado: {archivo} ({tamano:.0f} KB)"))
+        if fotos:
+            self.stdout.write(f"Fotos de los platos: {fotos.name} ({fotos.stat().st_size / 1024:.0f} KB)")
         if borrados:
             self.stdout.write(f"Respaldos antiguos eliminados: {len(borrados)} (se conservan {conservar}).")

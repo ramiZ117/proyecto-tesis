@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Mesas{% endblock %}
+{% block subtitle %}{{ activas|length }} mesa{{ activas|length|pluralize }} en servicio · {{ capacidad_total }} puestos · así las ve el mesero en su mapa{% endblock %}
+{% block heading %}Mesas del salón{% endblock %}
+{% block top_actions %}<a class="btn" href="{% url 'gestion:mesa_nueva' %}">{% include "_icono.html" with nombre="mas" grosor="2.4" %}Agregar mesa</a>{% endblock %}
+{% block content %}
+<div class="split">
+  <section class="principal subir">
+    <h2 class="obs fuerte" style="margin: 0 0 8px">Plano del salón</h2>
+    <div class="mesa-grid" style="--cols: {{ columnas }}">
+      {% for m in activas %}
+        <a class="mesa {{ m.estado }} forma-{{ m.forma }}" style="grid-column: {{ m.pos_x|add:1 }} / span {{ m.ancho }}; grid-row: {{ m.pos_y|add:1 }}; text-decoration: none" href="{% url 'gestion:mesa' m.pk %}" aria-label="Editar mesa {{ m.numero }}">
+          <span class="fila"><span class="num">{{ m.numero }}</span><span class="cap">{% include "_icono.html" with nombre="persona" %}{{ m.capacidad }}</span></span>
+          <span class="pill {{ m.estado }}">{{ m.get_estado_display }}</span>
+          <span class="info">Columna {{ m.pos_x|add:1 }}, fila {{ m.pos_y|add:1 }}</span>
+        </a>
+      {% empty %}
+        <p class="vacio" style="grid-column: 1 / -1">No hay mesas en servicio. Agrega la primera.</p>
+      {% endfor %}
+    </div>
+  </section>
+  <aside class="lateral subir d2">
+    <section class="card">
+      <h2>Todas las mesas</h2>
+      <div class="tabla-caja">
+        <table>
+          <thead><tr><th>Mesa</th><th>Personas</th><th>Estado</th><th></th></tr></thead>
+          <tbody>
+            {% for m in mesas %}
+              <tr{% if not m.activa %} style="opacity:.55"{% endif %}>
+                <td class="fuerte">{{ m.numero }}</td>
+                <td>{{ m.capacidad }}</td>
+                <td>{% if m.activa %}<span class="pill {{ m.estado }}">{{ m.get_estado_display }}</span>{% else %}<span class="pill gris">Retirada</span>{% endif %}</td>
+                <td class="der"><a class="btn sm secundario" href="{% url 'gestion:mesa' m.pk %}">Editar</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">Para retirar una mesa, edítala y desmarca «En servicio» (debe estar disponible). Su historial se conserva y puedes volver a activarla.</p>
+    </section>
+  </aside>
+</div>
+{% endblock %}

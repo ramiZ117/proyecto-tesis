@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{% if promo.pk %}{{ promo.nombre }}{% else %}Nueva promoción{% endif %}{% endblock %}
+{% block subtitle %}Promociones{% endblock %}
+{% block heading %}{% if promo.pk %}{{ promo.nombre }}{% else %}Nueva promoción{% endif %}{% endblock %}
+{% block top_actions %}<a class="btn secundario" href="{% url 'gestion:promociones' %}">← Promociones</a>{% endblock %}
+{% block content %}
+<form method="post" enctype="multipart/form-data" class="split" data-sin-parcial>
+  {% csrf_token %}
+  {{ items.management_form }}
+  <section class="card principal subir pila" style="gap: 6px">
+    {% for e in form.non_field_errors %}<p class="error-campo">{{ e }}</p>{% endfor %}
+    <div class="grid-auto" style="--min: 220px; gap: 0 16px">
+      {% include "gestion/_campo.html" with campo=form.nombre %}
+      {% include "gestion/_campo.html" with campo=form.precio_usd %}
+    </div>
+    {% include "gestion/_campo.html" with campo=form.descripcion %}
+
+    <h3>¿Qué incluye? <span class="obs" style="font-weight: 600">· cada plato sale a cocina por separado</span></h3>
+    {% for e in items.non_form_errors %}<p class="error-campo">{{ e }}</p>{% endfor %}
+    <div class="tabla-caja">
+      <table>
+        <thead><tr><th>Plato</th><th style="width: 120px">Cantidad</th><th style="width: 90px">Quitar</th></tr></thead>
+        <tbody>
+          {% for f in items %}
+            <tr>
+              <td>{% for h in f.hidden_fields %}{{ h }}{% endfor %}{{ f.producto }}{% for e in f.producto.errors %}<div class="error-campo">{{ e }}</div>{% endfor %}</td>
+              <td>{{ f.cantidad }}{% for e in f.cantidad.errors %}<div class="error-campo">{{ e }}</div>{% endfor %}</td>
+              <td>{% if f.instance.pk %}<label class="stack" style="margin:0">{{ f.DELETE }} Quitar</label>{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if promo.pk %}<p class="hint">Por separado costaría <strong>${{ promo.precio_normal_usd }}</strong>{% if promo.ahorro_usd %}: el cliente ahorra <strong>${{ promo.ahorro_usd }}</strong>{% endif %}.</p>{% endif %}
+
+    <div class="grid-auto" style="--min: 160px; gap: 0 16px">
+      {% include "gestion/_campo.html" with campo=form.desde %}
+      {% include "gestion/_campo.html" with campo=form.hasta %}
+      {% include "gestion/_campo.html" with campo=form.orden %}
+    </div>
+    <div class="interruptores">{% include "gestion/_campo.html" with campo=form.activa %}</div>
+    <div class="stack" style="margin-top: 8px">
+      <button class="btn grande" type="submit">Guardar promoción</button>
+      <a class="btn secundario" href="{% url 'gestion:promociones' %}">Cancelar</a>
+    </div>
+  </section>
+
+  <aside class="lateral subir d2">
+    <section class="card pila" style="gap: 10px">
+      <h2 style="margin:0">Foto</h2>
+      <div class="vista-foto" id="vista-foto">
+        {% if promo.foto %}<img src="{{ promo.foto.url }}" alt="Foto actual de {{ promo.nombre }}">{% else %}<span class="sin-foto">{% include "_icono.html" with nombre="foto" grosor="1.5" %}Sin foto: se mostrarán las de sus platos</span>{% endif %}
+      </div>
+      <label for="{{ form.foto.id_for_label }}" class="btn secundario bloque" style="margin: 0">{% include "_icono.html" with nombre="foto" %}{% if promo.foto %}Cambiar foto{% else %}Subir foto{% endif %}</label>
+      <input type="file" name="foto" id="{{ form.foto.id_for_label }}" accept="image/jpeg,image/png,image/webp" class="oculto" data-vista-previa="vista-foto">
+      {% if promo.foto %}<label class="stack" style="margin:0"><input type="checkbox" name="foto-clear" id="foto-clear_id"> Quitar la foto actual</label>{% endif %}
+      {% for e in form.foto.errors %}<p class="error-campo">{{ e }}</p>{% endfor %}
+      <p class="hint" style="margin:0">Opcional. Si no subes una, el menú arma la imagen con las fotos de los platos incluidos.</p>
+    </section>
+  </aside>
+</form>
+<script>
+  document.querySelectorAll("[data-vista-previa]").forEach(function (input) {
+    input.addEventListener("change", function () {
+      var archivo = input.files && input.files[0];
+      var caja = document.getElementById(input.getAttribute("data-vista-previa"));
+      if (!archivo || !caja) return;
+      var img = document.createElement("img");
+      img.alt = "Vista previa de la foto nueva";
+      img.src = URL.createObjectURL(archivo);
+      caja.replaceChildren(img);
+    });
+  });
+</script>
+{% endblock %}

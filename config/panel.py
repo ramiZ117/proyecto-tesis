@@ -17,7 +17,7 @@ from mesas.models import DetallePedido, Mesa, Pedido
 CENTAVO = Decimal("0.01")
 PERIODOS = {"hoy": "Hoy", "semana": "Semana", "mes": "Mes"}
 DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-COLORES_METODO = {"PMO": "#1B7F45", "DIV": "#E5B830", "EFE": "#2457C5", "TAR": "#B9A6EC"}
+COLORES_METODO = {"PMO": "#1B7F45", "DIV": "#E5B830", "EFE": "#2457C5", "TAR": "#B9A6EC", "BIN": "#C9A227", "ZIN": "#6C3FD1"}
 
 
 def _inicio_dia(fecha):
@@ -167,6 +167,10 @@ def indicadores(periodo: str = "hoy") -> dict:
         "titulo_barras": {"hoy": "Ventas por hora", "semana": "Ventas por día", "mes": "Ventas por semana"}[periodo],
         "comparacion": {"hoy": "ayer", "semana": "la semana pasada", "mes": "el mes pasado"}[periodo],
         "ventas_local": datos["total_local"],
+        "iva_local": datos["iva_local"],
+        "base_local": datos["base_local"],
+        "igtf_local": datos["igtf_local"],
+        "en_linea": _en_linea_hoy(),
         "ventas_usd": datos["total_usd"],
         "delta": delta,
         "facturas": datos["cantidad_facturas"],
@@ -182,3 +186,11 @@ def indicadores(periodo: str = "hoy") -> dict:
         "alertas": alertas[:4],
         "actividad": _actividad(),
     }
+
+
+
+def _en_linea_hoy() -> int:
+    from mesas.models import PedidoEnLinea
+
+    return PedidoEnLinea.objects.filter(creado_en__date=timezone.localdate()).exclude(
+        estado=PedidoEnLinea.Estado.RECHAZADO).count()

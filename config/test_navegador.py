@@ -15,6 +15,7 @@ from unittest import skipUnless
 
 from django.contrib.auth.models import Group, User
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
+from django.test import override_settings
 
 from caja.models import TasaCambio
 from config.permisos import GRUPO_CAJA, GRUPO_COCINA, GRUPO_MESERO
@@ -43,6 +44,8 @@ def _canal():
 
 
 @skipUnless(HAY_PLAYWRIGHT, "Playwright no está instalado (pip install -r requirements-dev.txt)")
+# Pruebas anteriores al IGTF: verifican conversión, vuelto y cierre sin el 3 % (el IGTF tiene sus propias pruebas).
+@override_settings(IGTF_METODOS=[])
 class NavegadorTests(StaticLiveServerTestCase):
     @classmethod
     def setUpClass(cls):
@@ -116,12 +119,12 @@ class NavegadorTests(StaticLiveServerTestCase):
         self.assertEqual(cocina.locator(".ticket li").count(), 1)
         cocina.click(".segmentos a:has-text('Todo')")
         cocina.wait_for_load_state("networkidle")
-        for _ in range(2):
-            cocina.click("button:has-text('Empezar') >> nth=0")
-            self.esperar_mensaje(cocina, "en preparación")
-        for _ in range(2):
-            cocina.click("button.accion-kds:has-text('Listo') >> nth=0")
-            self.esperar_mensaje(cocina, "listo para servir")
+        # Un solo botón por pedido: «Empezar» toma todos sus platos y «Todo listo» los termina.
+        self.assertEqual(cocina.locator("button:has-text('Empezar')").count(), 1)
+        cocina.click("button:has-text('Empezar')")
+        self.esperar_mensaje(cocina, "2 platos en preparación")
+        cocina.click("button.accion-kds:has-text('Todo listo')")
+        self.esperar_mensaje(cocina, "listo para servir")
         self.assertFalse(DetallePedido.objects.exclude(estado=DetallePedido.Estado.LISTO).exists())
 
         # Salón: entregar y pedir la cuenta.

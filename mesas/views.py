@@ -7,9 +7,9 @@ from django.views.decorators.http import require_POST
 from caja.models import TasaCambio
 from config.dinero import precio_local_vigente
 from config.permisos import GRUPO_MESERO, es_admin, requiere_grupo, texto_validacion
-from inventario.models import Categoria, Producto
+from inventario.models import Categoria, Producto, Promocion
 from inventario.servicios import disponibilidad_menu
-from mesas.models import DetallePedido, Mesa, Pedido
+from mesas.models import DetallePedido, Mesa, Pedido, SolicitudCliente
 
 
 def _atiende(request, pedido: Pedido) -> bool:
@@ -42,29 +42,32 @@ def _contexto_mapa(seleccionada: int | None = None):
         )
     }
     mesas = list(Mesa.objects.filter(activa=True))
+    llamados = {s.mesa_id: s for s in SolicitudCliente.objects.filter(estado=SolicitudCliente.Estado.PENDIENTE)}
     conteo = {estado: 0 for estado in Mesa.Estado.values}
     for mesa in mesas:
         conteo[mesa.estado] += 1
         mesa.pedido_info = pedidos_abiertos.get(mesa.pk)
+        mesa.llamado = llamados.get(mesa.pk)
         mesa.seleccionada = mesa.pk == seleccionada
         if mesa.pedido_info:
             detalles = list(mesa.pedido_info.detalles.all())
             mesa.total_info = sum((d.subtotal for d in detalles), 0)
             mesa.listos_info = sum(1 for d in detalles if d.estado == DetallePedido.Estado.LISTO)
-    posiciones = {(m.pos_x, m.pos_y) for m in mesas}
-    usar_posiciones = len(posiciones) == len(mesas) and len(mesas) > 0
+    celdas = [c for m in mesas for c in m.celdas()]
+    usar_posiciones = len(set(celdas)) == len(celdas) and len(mesas) > 0
     return {
         "mesas": mesas,
         "usar_posiciones": usar_posiciones,
-        "columnas": (max((m.pos_x for m in mesas), default=0) + 1) if usar_posiciones else 4,
+        "columnas": max((m.pos_x + m.ancho for m in mesas), default=1) if usar_posiciones else 4,
         "conteo": conteo,
         "seleccionada": seleccionada,
+        "llamados": len(llamados),
     }
 
 
 def _para_llevar():
     return list(
-        Pedido.objects.filter(tipo=Pedido.Tipo.LLEVAR)
+        Pedido.objects.filter(tipo=Pedido.Tipo.LLEVAR, en_linea=False)
         .exclude(estado__in=[Pedido.Estado.CERRADO, Pedido.Estado.ANULADO])
         .select_related("mesero")
         .prefetch_related(
@@ -138,12 +141,27 @@ def comanda(request, pedido_id):
             producto.porciones = porciones.get(producto.pk)
             producto.agotado = producto.porciones is not None and producto.porciones <= 0
     detalles = [d for d in pedido.detalles.all() if d.estado != DetallePedido.Estado.ANULADO]
+    promociones = [p for p in Promocion.vigentes() if p.disponible]
+    for promo in promociones:
+        promo.precio_bs = precio_local_vigente(promo.precio_usd)
+        promo.agotada = any(
+            porciones.get(i.producto_id) is not None and porciones[i.producto_id] < i.cantidad for i in promo.items.all()
+        )
+    solicitud = None
+    if pedido.mesa_id:
+        solicitud = SolicitudCliente.objects.filter(mesa_id=pedido.mesa_id, estado=SolicitudCliente.Estado.PENDIENTE).first()
+        if solicitud:
+            solicitud.filas = solicitud.detalle()
     contexto = _contexto_mapa(pedido.mesa_id)
     contexto.update(
         {
             "llevar": _para_llevar(),
             "pedido": pedido,
             "categorias": categorias,
+            "promociones": promociones,
+            "solicitud": solicitud,
+            "cuenta_cliente": _cuenta_cliente(pedido),
+            "minutos_estimados": _minutos_pedido(pedido),
             "facturado": pedido.factura_activa,
             "hay_sin_enviar": any(not d.enviado for d in detalles),
             "nuevos": sum(d.cantidad for d in detalles if not d.enviado),
@@ -354,3 +372,132 @@ def marcar_limpia(request, mesa_id):
     mesa.marcar_disponible()
     messages.success(request, f"Mesa {mesa.numero} disponible.")
     return redirect("mesas:mapa")
+
+
+def _promo_vigente(promocion_id):
+    from inventario.models import Promocion
+
+    return Promocion.vigentes().filter(pk=promocion_id).first()
+
+
+@requiere_grupo(GRUPO_MESERO)
+@require_POST
+def agregar_promocion(request, pedido_id):
+    pedido, respuesta = _pedido_propio(request, pedido_id)
+    if respuesta:
+        return respuesta
+    promo = _promo_vigente(request.POST.get("promocion_id") or 0) if (request.POST.get("promocion_id") or "").isdigit() else None
+    if promo is None:
+        messages.error(request, "Esa promoción no está disponible hoy.")
+        return _volver(pedido)
+    if not TasaCambio.objects.filter(activa=True).exists():
+        messages.error(request, "No hay tasa de cambio vigente: pide al cajero o al administrador que la registre.")
+        return _volver(pedido)
+    porciones = disponibilidad_menu()
+    for item in promo.items.all():
+        libres = porciones.get(item.producto_id)
+        if libres is not None and libres < item.cantidad:
+            messages.error(request, f"No alcanza {item.producto.nombre} para la promoción (quedan {max(libres, 0)}).")
+            return _volver(pedido)
+    try:
+        pedido.agregar_promocion(promo)
+    except ValidationError as exc:
+        messages.error(request, texto_validacion(exc))
+        return _volver(pedido)
+    messages.success(request, f"Se agregó la promoción {promo.nombre}. Recuerda enviarla a cocina.")
+    return _volver(pedido)
+
+
+def _solicitud_de(request, solicitud_id):
+    """Solicitud pendiente + comanda de su mesa (la abre si hace falta). Devuelve (solicitud, pedido, respuesta)."""
+    solicitud = get_object_or_404(SolicitudCliente.objects.select_related("mesa"), pk=solicitud_id)
+    if solicitud.estado != SolicitudCliente.Estado.PENDIENTE:
+        messages.info(request, "Esa solicitud ya fue atendida.")
+        return solicitud, None, redirect("mesas:mapa")
+    try:
+        pedido, _ = Pedido.abrir_para(solicitud.mesa_id, request.user)
+    except ValidationError as exc:
+        messages.error(request, texto_validacion(exc))
+        return solicitud, None, redirect("mesas:mapa")
+    pedido, respuesta = _pedido_propio(request, pedido.pk)
+    return solicitud, pedido, respuesta
+
+
+@requiere_grupo(GRUPO_MESERO)
+@require_POST
+def cargar_solicitud(request, solicitud_id):
+    """Pasa lo que pidió el cliente desde el menú a la comanda: queda sin enviar para revisarlo."""
+    solicitud, pedido, respuesta = _solicitud_de(request, solicitud_id)
+    if respuesta:
+        return respuesta
+    if not TasaCambio.objects.filter(activa=True).exists():
+        messages.error(request, "No hay tasa de cambio vigente: pide al cajero o al administrador que la registre.")
+        return _volver(pedido)
+    try:
+        agregados, avisos = solicitud.cargar_en(pedido, request.user)
+    except ValidationError as exc:
+        messages.error(request, texto_validacion(exc))
+        return _volver(pedido)
+    for aviso in avisos:
+        messages.warning(request, aviso)
+    if agregados:
+        messages.success(request, f"Pedido del cliente cargado ({agregados} plato{'s' if agregados != 1 else ''}). Revísalo y envíalo a cocina.")
+    elif not avisos:
+        messages.success(request, "Llamado atendido.")
+    return _volver(pedido)
+
+
+@requiere_grupo(GRUPO_MESERO)
+@require_POST
+def descartar_solicitud(request, solicitud_id):
+    solicitud, pedido, respuesta = _solicitud_de(request, solicitud_id)
+    if respuesta:
+        return respuesta
+    try:
+        solicitud.descartar(request.user)
+        messages.success(request, "Llamado atendido." if solicitud.es_solo_llamado else "Solicitud del cliente descartada.")
+    except ValidationError as exc:
+        messages.error(request, texto_validacion(exc))
+    return _volver(pedido)
+
+
+def _cuenta_cliente(pedido):
+    from caja.models import SolicitudCuenta
+
+    return SolicitudCuenta.activa_de(pedido)
+
+
+
+@requiere_grupo(GRUPO_MESERO)
+@require_POST
+def personalizar_item(request, detalle_id):
+    """Opciones permitidas del plato (sin vegetales, salsa aparte…) y nota libre, antes de enviarlo a cocina."""
+    detalle = get_object_or_404(DetallePedido.objects.select_related("pedido", "producto"), pk=detalle_id)
+    pedido, respuesta = _pedido_propio(request, detalle.pedido_id)
+    if respuesta:
+        return respuesta
+    if detalle.enviado or detalle.promocion_id or detalle.estado != DetallePedido.Estado.PENDIENTE:
+        messages.error(request, "Solo se personalizan los platos que aún no se envían a cocina.")
+        return _volver(pedido)
+    permitidas = {o.casefold(): o for o in detalle.producto.lista_opciones}
+    elegidas = []
+    for opcion in request.POST.getlist("opcion"):
+        clave = " ".join(opcion.split()).casefold()
+        if clave not in permitidas:
+            messages.error(request, f"«{opcion[:40]}» no es una opción de {detalle.producto.nombre}.")
+            return _volver(pedido)
+        if permitidas[clave] not in elegidas:
+            elegidas.append(permitidas[clave])
+    nota = " ".join((request.POST.get("nota") or "").split())[:120]
+    texto = ", ".join(elegidas) + (" · " if elegidas and nota else "") + nota
+    detalle.observaciones = texto[:250]
+    detalle.save(update_fields=["observaciones", "actualizado_en"])
+    messages.success(request, f"{detalle.producto.nombre}: {texto or 'sin personalizar'}.")
+    return _volver(pedido)
+
+
+
+def _minutos_pedido(pedido):
+    from cocina.tiempos import estimar_pedido
+
+    return estimar_pedido(pedido)

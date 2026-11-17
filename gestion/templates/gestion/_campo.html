@@ -1,0 +1,11 @@
+{% if campo.field.widget.input_type == "checkbox" %}
+  <label class="interruptor-fila" for="{{ campo.id_for_label }}">{{ campo }}<span>{{ campo.label }}</span></label>
+{% else %}
+  <div>
+    <label for="{{ campo.id_for_label }}">{{ campo.label }}{% if campo.field.required %} <span aria-hidden="true" style="color: var(--rojo-tinta)">*</span>{% endif %}</label>
+    {{ campo }}
+    {% if campo.help_text %}<div class="hint" style="margin-top: 4px">{{ campo.help_text }}</div>{% endif %}
+    {% for e in campo.errors %}<div class="error-campo" role="alert">{{ e }}</div>{% endfor %}
+  </div>
+{% endif %}
+{% for e in campo.errors %}{% if campo.field.widget.input_type == "checkbox" %}<div class="error-campo">{{ e }}</div>{% endif %}{% endfor %}

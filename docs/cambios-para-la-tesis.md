@@ -1,83 +1,44 @@
-# Cambios para el documento de tesis
+# Cambios en el documento de tesis
 
-Lista de ajustes para que el documento (`tesis def.txt`) coincida con el sistema entregado.
-Cada punto indica la sección, el problema y un texto propuesto.
+El archivo `tesis def.txt` ya fue actualizado para que describa el sistema entregado. Este
+documento resume qué se cambió y qué queda pendiente de hacer a mano en el documento de Word.
 
-## 1. Correcciones de forma
+## Aplicado en el texto
 
-| Dónde | Problema | Corrección |
-|---|---|---|
-| Portada / objetivo general | El título dice **2026** y el objetivo general y la fecha dicen **2027** | Unificar el año |
-| Índice general | Numeración del capítulo IV (4.1 Fase de inicio, 4.2 Elaboración…) distinta del cuerpo (4.1 Diagnosticar… 4.6 Documentación); en el capítulo III también difiere (3.2 Población vs. 3.3) | Regenerar el índice desde los títulos |
-| 4.2.4.1 Definición de actores | La frase "En el diagnóstico organizacional, este rol se identificó como mesonero" está en el párrafo del Administrador | Moverla al párrafo del Mesero |
-| RF-02 | Lista los estados "libre, ocupada, por facturar" | Agregar "por limpiar" y los pedidos para llevar (ver punto 3) |
-
-## 2. Base de datos: SQLite en lugar de PostgreSQL
-
-Afecta 4.3 (introducción), 4.3.13 (capa de acceso a datos), 4.3.14, 4.3.15 (despliegue), 4.4 y el
-cuadro de nodos. Texto propuesto para 4.3.13, en reemplazo de los párrafos sobre PostgreSQL:
-
-> SQLite es el motor de producción. El restaurante opera como un solo local con un servidor en su
-> red interna; una base contenida en un archivo elimina la administración de un motor aparte y
-> convierte el respaldo en una copia verificable del archivo, lo que también mitiga el riesgo de
-> cortes de luz o de internet. La concurrencia se resuelve abriendo cada transacción en modo
-> inmediato (`transaction_mode=IMMEDIATE`): la transacción toma el candado de escritura al
-> comenzar, de modo que dos aperturas de la misma mesa, dos emisiones de factura o dos cierres
-> simultáneos se atienden en fila y la segunda ya ve lo que escribió la primera. El registro por
-> adelantado (WAL) permite que las consultas del mapa, la cocina y los reportes no esperen a las
-> escrituras. Las reglas críticas quedan además protegidas por restricciones de la base:
-> `uniq_pedido_abierto_por_mesa`, `uniq_factura_vigente_por_pedido`, la unicidad del número de
-> factura (con reintento en `Factura.emitir_desde_pedido`) y `uniq_cierre_secuencia_por_cajero`.
-
-En **4.3.15** reemplazar Nginx + Gunicorn + PostgreSQL por:
-
-| Nodo | Software | Función |
-|---|---|---|
-| Estaciones de salón, cocina y caja | Navegador | Igual que antes |
-| Servidor del restaurante (Windows o Linux) | Python, Django, **waitress**, **whitenoise** | `python manage.py servir` atiende las peticiones con 8 hilos; whitenoise sirve los archivos estáticos con huella y caché |
-| Base de datos | **SQLite** (archivo `db.sqlite3` en el mismo equipo) | Persiste todas las tablas; `python manage.py respaldar` crea copias diarias verificadas |
-
-Variables del despliegue: `DJANGO_DEBUG=0`, `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`,
-`DJANGO_CSRF_ORIGINS`, `DJANGO_HTTPS` (1 solo con certificado), `DB_PATH`, `RESPALDOS_DIR`.
-
-## 3. Funciones nuevas que conviene describir
-
-| Sección | Agregar |
+| Sección | Cambio |
 |---|---|
-| 4.1.1 (menciona pedidos "para llevar o despachos") y RF-02 | El mesero abre **pedidos para llevar** con el nombre del cliente (código L-001…); siguen el mismo flujo de cocina y se cobran en caja al retirarlos, sin mesa |
-| RF-02 / CU-COM-01 | Cambiar la cantidad antes de enviar, **nota general de la comanda**, **mover de mesa** |
-| RF-03 / CU-COM-02 | Tablero por columnas (nuevos, preparando, listos), **filtro por estación** (parrilla, fríos, bebidas), cronómetro y **aviso sonoro** |
-| RF-04 / CU-INV-01 | **Punto de reposición y stock máximo** (cap. 2.2.2), **merma con motivo**, **ajuste por conteo** (administrador), **proveedor y costo** por insumo, **lista de compra** exportable y **costo y margen por plato** |
-| RF-05 / CU-FAC-01 | Calculadora de vuelto en pantalla; confirmación cuando la tasa cambia más de 20 % |
-| Nuevo (MIS, cap. 2.2.1) | **Panel del administrador**: ventas por período con comparación, ventas por hora/día, cobros por método, platos más vendidos, tiempo medio de cocina y alertas |
-| 4.2.3 Riesgos | Mitigación del riesgo 3 implementada: `respaldar` con verificación de integridad y rotación |
+| 4.2.1 Requerimientos funcionales | RF-02 con estados completos, pedidos para llevar, cantidades, nota y mover de mesa. RF-03 con columnas, estaciones y aviso sonoro. RF-04 con reposición, máximo, costo, proveedor, lista de compra, margen, mermas y ajustes. RF-05 con calculadora de vuelto y confirmación de tasa. **Nuevos:** RF-06 (administración y panel gerencial) y RF-07 (menú digital con asistente) |
+| 4.2.2 Requerimientos no funcionales | **Nuevos:** RNF-05 (operación local y respaldo) y RNF-06 (asistente acotado y con alternativa) |
+| 4.2.4.1 Actores | Frase del "mesonero" movida al mesero; el administrador usa el módulo de administración propio; el cliente participa como visitante anónimo del menú digital |
+| 4.2.4.2 | Ocho módulos (se suma el menú digital) |
+| 4.3 y 4.3.13 | SQLite en lugar de PostgreSQL, con la explicación de la concurrencia (transacciones inmediatas, WAL y restricciones) |
+| CU-INV-01, CU-MES-01, CU-MEN-01, CU-USU-01 | Ajuste por conteo y merma; alta y retiro de mesas por el administrador; foto y etiquetas del plato; sin panel de administración genérico |
+| **Nuevo** 4.3.7.3 y Cuadro 13-A | Caso de uso CU-DIG-01 «Consultar el menú digital y conversar con el asistente» |
+| 4.3.11 Diccionario de datos | Pedido (tipo, cliente, mesa opcional), DetallePedido (`listo_en`), Producto (foto, crédito, etiquetas), Insumo (grupos, reposición, máximo, costo, proveedor), MovimientoStock (Merma, motivo, costo, usuario). **Nuevos:** Cuadro 20-A Proveedor y 20-B Categoría |
+| 4.3.12 y 4.3.13 | Paquetes `gestion` y `menu`; nuevas superficies en la capa de presentación |
+| 4.3.14 | Recorrido de la petición hasta SQLite |
+| 4.3.15 Despliegue | Windows o Linux, waitress, whitenoise, SQLite, respaldos, teléfonos de los comensales y servicio de IA opcional |
+| 4.4 Construcción | Pedidos para llevar, cocina por estación, módulo de inventario, administración y panel, menú digital y asistente |
+| 4.5 Validación | Cuadro 27 ampliado, 209 pruebas y **Cuadro 28** con los tiempos medidos y las verificaciones de integridad |
+| 4.6 Documentación | Referencias a `docs/manual-usuario.md` y `docs/manual-tecnico.md` |
 
-## 4. Diccionario de datos (4.3.11)
+## Pendiente (hacer en Word)
 
-| Cuadro | Cambio |
-|---|---|
-| 15 · Pedido | Agregar `tipo` (en mesa / para llevar), `cliente`; `mesa` pasa a opcional. Restricciones: `uniq_pedido_abierto_por_mesa` (ya descrita) y `pedido_mesa_segun_tipo` |
-| 16 · DetallePedido | Agregar `listo_en` (momento en que cocina lo marcó listo; mide el tiempo de cocina) |
-| 17 · Producto / Categoría | Categoría: agregar `estacion` y `orden` |
-| 19 · Insumo | `grupo`: Carnes, Granos y legumbres, Panadería, Vegetales y hierbas, Lácteos, Especias y salsas, Bebidas, Otros. Agregar `punto_reposicion`, `stock_maximo`, `costo_unitario`, `proveedor` |
-| 20 · MovimientoStock | `tipo`: Entrada, Salida (venta), **Merma**, Ajuste. Agregar `motivo` (vencido, dañado, error de preparación, comanda anulada, conteo físico, otro), `costo_unitario`, `usuario` |
-| Nuevo · Proveedor | `nombre` (único), `contacto`, `telefono`, `activo` |
-| 26 · CierreCaja | `secuencia` ya figura en el cuadro y ahora existe en el sistema; el `desglose` guarda también la foto de las facturas del corte |
+1. **Año del título.** La portada dice "…Anzoátegui. **2026**." y el objetivo general y la fecha dicen
+   **2027**. Hay que decidir cuál es el correcto; no lo cambié porque no sé cuál corresponde.
+2. **Índice.** No coincide con los títulos del cuerpo (por ejemplo, "4.1 Fase de inicio" frente a
+   "4.1 Diagnosticar…"). En Word se regenera solo: Referencias → Actualizar tabla.
+3. **Figuras que hay que rehacer o agregar:**
+   - Fig. 3 (casos de uso del sistema): agregar el actor Comensal y el módulo de menú digital.
+   - Diagrama de casos de uso del nuevo CU-DIG-01.
+   - Fig. 38 (entidad-relación): campos nuevos y las tablas Proveedor y Categoría.
+   - Fig. 39 (paquetes): paquetes `gestion` y `menu`.
+   - Fig. 42 (despliegue): reemplazar Nginx, Gunicorn, PostgreSQL y Ubuntu por waitress, whitenoise
+     y SQLite en un equipo Windows o Linux, y agregar los teléfonos de los comensales y el servicio de IA.
+4. **Prueba de aceptación** con los 6 usuarios de la muestra (índice de aprobación del cuadro 2).
+5. **Opcional:** la comparación con Toast, Square, Fudo y Loyverse (`docs/comparativa-sistemas.md`)
+   puede citarse en el planteamiento o como trabajo futuro.
 
-## 5. Validación (4.5)
-
-Actualizar el cuadro 27 con la suite actual y agregar los resultados medidos:
-
-- **190 pruebas automáticas**, todas aprobadas, organizadas por módulo (ver manual técnico, sección 7),
-  incluida una prueba en un navegador real que recorre el ciclo mesero → cocina → caja.
-- **Rendimiento y concurrencia:** `python manage.py medir_rendimiento` con usuarios simultáneos
-  sobre una copia de la base. Copiar la tabla de `docs/resultados-rendimiento.md` (mediana y P95 por
-  operación; máximo por debajo de 2 s) como evidencia de RNF-01 y RNF-02, junto con las cinco
-  verificaciones de integridad.
-- Falta la **aceptación con el personal** (índice de aprobación del usuario final del cuadro 2):
-  aplicar una planilla breve a los 6 usuarios de la muestra tras usar el sistema una jornada.
-
-## 6. Documentación (4.6)
-
-El manual de usuario y el manual técnico ya existen en `docs/manual-usuario.md` y
-`docs/manual-tecnico.md`; los apartados 4.6.1 y 4.6.2 pueden resumirlos y remitir a ellos.
+Hay una copia exacta del archivo anterior en la carpeta de trabajo de esta sesión
+(`tesis-def-ORIGINAL.txt`); conviene guardarla también en otro lugar, porque `tesis def.txt` no
+está en git.

@@ -9,4 +9,6 @@ urlpatterns = [
     path("entrada/", views.entrada, name="entrada"),
     path("movimiento/", views.movimiento, name="movimiento"),
     path("compra.csv", views.compra_csv, name="compra_csv"),
+    path("movimientos/", views.movimientos, name="movimientos"),
+    path("insumo/<int:insumo_id>/kardex/", views.kardex, name="kardex"),
 ]

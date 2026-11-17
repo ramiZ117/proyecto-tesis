@@ -140,9 +140,40 @@ El administrador puede hacer todo lo anterior y además:
   y actividad reciente.
 - **Usuarios:** crear cuentas, asignar el rol, cambiar contraseñas y activar o desactivar.
   No puedes quitarte el rol de administrador ni desactivarte a ti mismo.
-- **Carta y recetas:** platos, precios en dólares, disponibilidad y la receta de cada plato.
-- **Proveedores** y la ficha de cada insumo (mínimo, punto de reposición, máximo y costo).
-- **Ajuste por conteo** en inventario: cuando el conteo físico no coincide con el sistema.
+- **Carta y recetas:** platos agrupados por categoría con su foto, etiquetas, costo y margen.
+  - **Nuevo plato** o **Editar**: nombre, categoría, precio en dólares, descripción, etiquetas
+    (recomendado, vegetariano, picante, sin gluten) y la receta (insumo y cantidad por porción).
+  - **Subir foto:** mejor horizontal, con buena luz y el plato centrado. El sistema la ajusta sola.
+    Si la foto no es propia, escribe el autor en «Crédito de la foto».
+  - **Quitar de la carta / Volver a la carta:** oculta o muestra el plato para meseros y clientes
+    sin borrarlo.
+  - **Categoría:** nombre, orden en la carta y estación de cocina (parrilla, fríos o bebidas).
+- **Insumos:** la ficha de cada insumo (grupo, unidad, proveedor, costo, mínimo, punto de
+  reposición y máximo). El stock no se edita en la ficha: se mueve desde Inventario con entradas,
+  mermas o el **ajuste por conteo**.
+- **Proveedores:** nombre, contacto y teléfono; aparecen en la lista de compra.
+- **Mesas:** el plano del salón tal como lo ve el mesero. **Agregar mesa** (número, personas,
+  columna y fila en el plano) o editar una. Para retirarla, desmarca «En servicio» (debe estar
+  disponible); su historial se conserva.
+- **Menú digital:** el enlace del menú para clientes, el QR general y uno por mesa, listos para
+  imprimir con **Imprimir QR**. También muestra si el asistente usa IA o el asistente local.
 - **Anular comandas ya preparadas** (lo preparado queda como merma) y **devolver pagos**.
-- **Panel técnico:** consulta de facturas, pagos, comandas y movimientos. Esos registros son de
-  solo lectura para proteger la auditoría.
+
+---
+
+## Clientes: menú digital
+
+Los comensales no necesitan usuario ni contraseña.
+
+1. Escanean el QR de su mesa con la cámara del teléfono (o abren el enlace que compartas por
+   WhatsApp o Instagram).
+2. Ven los **recomendados de la casa**, las categorías con fotos, precios en dólares y en
+   bolívares a la tasa del día. Pueden buscar por plato o ingrediente.
+3. Al tocar un plato ven su foto grande, la descripción, los ingredientes y las etiquetas.
+4. El botón **¿Te ayudo a elegir?** abre el asistente: explica los platos, recomienda según
+   gustos y muestra opciones vegetarianas o sin gluten. Ante alergias siempre pide confirmar con
+   el personal.
+5. Al final pueden **seguir al restaurante en Instagram**, **llamar** o **guardar el contacto**
+   en su teléfono.
+
+El menú no toma pedidos: para ordenar, el cliente llama a su mesonero.

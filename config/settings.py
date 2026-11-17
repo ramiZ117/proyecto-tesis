@@ -8,6 +8,7 @@ desarrollo (DEBUG activo, SQLite).
 
 import os
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -59,7 +60,6 @@ if not DEBUG:
 
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -71,6 +71,8 @@ INSTALLED_APPS = [
     'mesas.apps.MesasConfig',
     'cocina.apps.CocinaConfig',
     'caja.apps.CajaConfig',
+    'gestion',  # administración: carta, insumos, proveedores, mesas y menú digital
+    'menu',  # menú digital público para los clientes (QR) con asistente de IA
 ]
 
 MIDDLEWARE = [
@@ -102,6 +104,7 @@ TEMPLATES = [
                 'config.context_processors.roles',
                 'config.context_processors.tasa',
                 'config.context_processors.alertas_inventario',
+                "config.context_processors.pedidos_en_linea",
             ],
         },
     },
@@ -165,6 +168,35 @@ STORAGES = {
     },
 }
 
+# Fotos de los platos (subidas desde la administración).
+MEDIA_URL = "media/"
+MEDIA_ROOT = Path(os.environ.get("MEDIA_DIR") or BASE_DIR / "media")
+FOTO_MAX_BYTES = 6 * 1024 * 1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = FOTO_MAX_BYTES + 1024 * 1024
+
+# Menú digital para clientes. Dirección que codifican los QR (la que los teléfonos pueden abrir).
+MENU_URL_PUBLICA = os.environ.get("MENU_URL_PUBLICA", "").rstrip("/")
+
+# Datos del local que se muestran en el menú digital (seguir en Instagram, llamar y guardar contacto).
+RESTAURANTE_NOMBRE = os.environ.get("RESTAURANTE_NOMBRE", "Comida Árabe El Amir")
+RESTAURANTE_TELEFONO = os.environ.get("RESTAURANTE_TELEFONO", "0414-1111222")
+RESTAURANTE_WHATSAPP = os.environ.get("RESTAURANTE_WHATSAPP", "584141111222")  # dígitos con código de país; vacío lo oculta
+RESTAURANTE_INSTAGRAM = os.environ.get("RESTAURANTE_INSTAGRAM", "comidaarabeelamir_")
+RESTAURANTE_DIRECCION = os.environ.get("RESTAURANTE_DIRECCION", "Calle Bolívar, Puerto La Cruz, Anzoátegui")
+RESTAURANTE_RIF = os.environ.get("RESTAURANTE_RIF", "J-317688600")  # RIF del local para las facturas
+
+# Asistente de IA del menú. Proveedor: gemini | groq | xai | local (sin conexión).
+# Si no se indica, usa el primero que tenga clave; sin claves responde el asistente local.
+IA_PROVEEDOR = os.environ.get("IA_PROVEEDOR", "").strip().lower()
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+# Se pueden indicar varios separados por coma: si uno está saturado, se prueba el siguiente.
+GEMINI_MODELO = os.environ.get("GEMINI_MODELO", "gemini-flash-lite-latest,gemini-flash-latest")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODELO = os.environ.get("GROQ_MODELO", "llama-3.3-70b-versatile")
+XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
+XAI_MODELO = os.environ.get("XAI_MODELO", "grok-3-mini")
+IA_MENSAJES_POR_HORA = int(os.environ.get("IA_MENSAJES_POR_HORA", "30"))
+
 # Respaldos automáticos de la base (comando `respaldar`).
 RESPALDOS_DIR = Path(os.environ.get("RESPALDOS_DIR") or BASE_DIR / "respaldos")
 RESPALDOS_CONSERVAR = int(os.environ.get("RESPALDOS_CONSERVAR", "30"))
@@ -203,3 +235,46 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Cocina (KDS): minutos de espera para resaltar un pedido como demorado / crítico.
 KDS_MINUTOS_ALERTA = int(os.environ.get("KDS_MINUTOS_ALERTA", "15"))
 KDS_MINUTOS_CRITICO = int(os.environ.get("KDS_MINUTOS_CRITICO", "25"))
+
+# Las pruebas automáticas nunca llaman a un servicio de IA real (ni gastan la cuota gratuita):
+# las que lo necesitan lo simulan.
+if len(sys.argv) > 1 and sys.argv[1] == "test":
+    IA_PROVEEDOR = ""
+    GEMINI_API_KEY = GROQ_API_KEY = XAI_API_KEY = ""
+
+# Tasa oficial del BCV: se consulta sola cada TASA_BCV_HORAS horas (en segundo plano) y con el
+# comando `python manage.py actualizar_tasa`. Fuente: DolarApi, que publica la tasa oficial del BCV.
+TASA_BCV_AUTOMATICA = os.environ.get("TASA_BCV_AUTOMATICA", "1") == "1" and not (len(sys.argv) > 1 and sys.argv[1] == "test")
+TASA_BCV_URL = os.environ.get("TASA_BCV_URL", "https://ve.dolarapi.com/v1/dolares/oficial")
+TASA_BCV_HORAS = int(os.environ.get("TASA_BCV_HORAS", "2"))
+
+
+# ---- Impuestos -------------------------------------------------------------------------------
+# Los precios de la carta YA incluyen el IVA: al facturar se separa la base imponible y el impuesto.
+IVA_PORCENTAJE = Decimal(os.environ.get("IVA_PORCENTAJE", "16"))
+# IGTF: se suma al pago en divisas en efectivo (y a los métodos que se agreguen aquí).
+IGTF_PORCENTAJE = Decimal(os.environ.get("IGTF_PORCENTAJE", "3"))
+IGTF_METODOS = [m.strip() for m in os.environ.get("IGTF_METODOS", "DIV").split(",") if m.strip()]
+
+# ---- Correo (factura al cliente) ---------------------------------------------------------------
+# Cualquier servicio SMTP sirve. Para pruebas gratis: Brevo (300 correos/día) →
+#   EMAIL_HOST=smtp-relay.brevo.com  EMAIL_PORT=587  EMAIL_HOST_USER=<login SMTP>  EMAIL_HOST_PASSWORD=<clave SMTP>
+#   DEFAULT_FROM_EMAIL="Comida Árabe El Amir <correo-verificado@…>"
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "1") == "1"
+EMAIL_TIMEOUT = 15
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Comida Árabe El Amir <no-responder@elamir.local>")
+EMAIL_BACKEND = (
+    "django.core.mail.backends.smtp.EmailBackend" if EMAIL_HOST else "django.core.mail.backends.console.EmailBackend"
+)
+CORREO_SINCRONO = "test" in sys.argv  # en pruebas se envía en el acto para poder verificarlo
+
+# ---- Archivos privados (comprobantes de pago): NO se publican en /media/ ----------------------
+PRIVADO_ROOT = Path(os.environ.get("PRIVADO_ROOT", BASE_DIR / "privado"))
+COMPROBANTE_MAX_BYTES = 6 * 1024 * 1024
+
+# Platos que la cocina prepara a la vez (para estimar la espera del cliente).
+COCINA_PLATOS_SIMULTANEOS = int(os.environ.get("COCINA_PLATOS_SIMULTANEOS", "3"))

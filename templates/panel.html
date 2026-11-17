@@ -29,7 +29,12 @@
     <small>Mesas en servicio</small>
     <strong>{{ mesas_en_servicio }} <span style="font-size: 18px">de {{ mesas|length }}</span></strong>
     <div class="mini-mesas" aria-hidden="true">{% for m in mesas %}<span class="{{ m.estado }}" title="Mesa {{ m.numero }}: {{ m.get_estado_display }}"></span>{% endfor %}</div>
-    <span>{{ para_llevar }} pedido{{ para_llevar|pluralize }} para llevar en curso</span>
+    <span>{{ para_llevar }} pedido{{ para_llevar|pluralize }} para llevar en curso{% if en_linea %} · {{ en_linea }} en línea hoy{% endif %}</span>
+  </article>
+  <article class="kpi alzar subir d4">
+    <small>Impuestos del período</small>
+    <strong>Bs {{ iva_local|intcomma }}</strong>
+    <span>IVA sobre una base de Bs {{ base_local|intcomma }}{% if igtf_local %} · IGTF Bs {{ igtf_local|intcomma }}{% endif %}</span>
   </article>
   <article class="kpi alzar subir d4">
     <small>Tiempo medio en cocina</small>

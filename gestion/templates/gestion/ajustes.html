@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Cobros y delivery{% endblock %}
+{% block subtitle %}Lo que ven los clientes al pedir la cuenta desde su mesa y en el menú digital{% endblock %}
+{% block heading %}Cobros y delivery{% endblock %}
+{% block content %}
+<form method="post" class="split" data-sin-parcial>
+  {% csrf_token %}
+  <div class="principal pila" style="gap: 16px">
+    {% for e in form.non_field_errors %}<p class="error-campo">{{ e }}</p>{% endfor %}
+    <section class="card subir pila" style="gap: 4px">
+      <h2 style="margin:0">Pago móvil</h2>
+      <p class="obs" style="margin:0 0 6px">Con los tres primeros datos el cliente puede pagar desde su mesa y caja solo confirma.</p>
+      <div class="grid-auto" style="--min: 220px; gap: 0 16px">
+        {% include "gestion/_campo.html" with campo=form.pm_banco %}
+        {% include "gestion/_campo.html" with campo=form.pm_telefono %}
+        {% include "gestion/_campo.html" with campo=form.pm_documento %}
+        {% include "gestion/_campo.html" with campo=form.pm_titular %}
+      </div>
+    </section>
+    <section class="card subir d1 pila" style="gap: 4px">
+      <h2 style="margin:0">Binance y Zinli</h2>
+      <p class="obs" style="margin:0 0 6px">Déjalos vacíos si el local no los usa: no aparecerán como opción.</p>
+      <div class="grid-auto" style="--min: 220px; gap: 0 16px">
+        {% include "gestion/_campo.html" with campo=form.binance_id %}
+        {% include "gestion/_campo.html" with campo=form.zinli_correo %}
+      </div>
+    </section>
+    <section class="card subir d2 pila" style="gap: 4px">
+      <h2 style="margin:0">Pedidos para retirar</h2>
+      <p class="obs" style="margin:0 0 6px">Quien abre el menú con el enlace general (no el QR de una mesa) puede pedir, pagar por pago móvil, Binance o Zinli y subir el comprobante. Caja lo verifica en «Pedidos en línea».</p>
+      <div class="interruptores">{% include "gestion/_campo.html" with campo=form.retiro_activo %}</div>
+    </section>
+    <section class="card subir d2 pila" style="gap: 4px">
+      <h2 style="margin:0">Delivery por apps</h2>
+      <p class="obs" style="margin:0 0 6px">El menú muestra, solo como información, que el local también recibe pedidos a domicilio por PedidosYa y Yummy.</p>
+      <div class="interruptores">{% include "gestion/_campo.html" with campo=form.mostrar_delivery %}</div>
+    </section>
+    <div class="stack"><button class="btn grande" type="submit">Guardar</button></div>
+  </div>
+  <aside class="lateral subir d2">
+    <section class="card pila" style="gap: 8px">
+      <h2 style="margin:0">Así pagan desde la mesa</h2>
+      <ol class="obs" style="margin:0; padding-left: 18px; display: grid; gap: 6px">
+        <li>Cuando el mesero marca la comida como entregada, al cliente le aparece «Pedir la cuenta».</li>
+        <li>Elige el método. Con pago móvil{% if ajustes.binance_id %}, Binance{% endif %}{% if ajustes.zinli_correo %} o Zinli{% endif %} ve estos datos, el monto y puede sumar propina.</li>
+        <li>Paga y escribe la referencia. En caja aparece «Pago reportado»: verificas y confirmas con un toque.</li>
+        <li>Con efectivo, divisa o tarjeta se le pide pasar por caja.</li>
+      </ol>
+      <p class="hint" style="margin:0">Activos ahora: {% if ajustes.pago_movil_listo %}pago móvil{% else %}<strong>pago móvil sin datos</strong>{% endif %}{% if ajustes.binance_id %} · Binance{% endif %}{% if ajustes.zinli_correo %} · Zinli{% endif %}.</p>
+    </section>
+  </aside>
+</form>
+{% endblock %}

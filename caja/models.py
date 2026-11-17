@@ -25,13 +25,22 @@ class TasaCambio(models.Model):
         decimal_places=4,
         validators=[MinValueValidator(Decimal("0.0001"))],
     )
+    class Fuente(models.TextChoices):
+        MANUAL = "MAN", "Manual"
+        BCV = "BCV", "BCV (automática)"
+
     vigente_desde = models.DateTimeField(default=timezone.now)
     creada_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="tasas_cambio",
+        null=True,
+        blank=True,
+        help_text="Vacío cuando la tasa la publicó el sistema desde el BCV.",
     )
     activa = models.BooleanField(default=True)
+    fuente = models.CharField(max_length=3, choices=Fuente.choices, default=Fuente.MANUAL)
+    fecha_valor = models.DateField(null=True, blank=True, help_text="Fecha valor publicada por el BCV.")
 
     class Meta:
         verbose_name = "tasa de cambio"
@@ -77,6 +86,22 @@ class Factura(models.Model):
     pagada_en = models.DateTimeField(null=True, blank=True)
     anulada_en = models.DateTimeField(null=True, blank=True)
     motivo_anulacion = models.CharField(max_length=200, blank=True)
+    iva_porcentaje = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.00"))
+    base_imponible_local = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    iva_local = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    # Factura personalizada: vacíos = consumidor final (cliente genérico).
+    cliente_nombre = models.CharField(max_length=120, blank=True)
+    cliente_documento = models.CharField(max_length=20, blank=True, help_text="Cédula o RIF.")
+    cliente_direccion = models.CharField(max_length=200, blank=True)
+    cliente_telefono = models.CharField(max_length=20, blank=True)
+    cliente_correo = models.EmailField(blank=True, help_text="Adonde se envía la factura.")
+    correo_enviado_en = models.DateTimeField(null=True, blank=True)
+    correo_error = models.CharField(max_length=200, blank=True)
+    descuento_local = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    descuento_motivo = models.CharField(max_length=200, blank=True)
+    descuento_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="descuentos_aplicados"
+    )
 
     class Meta:
         verbose_name = "factura"
@@ -105,9 +130,37 @@ class Factura(models.Model):
     def saldo_usd(self) -> Decimal:
         return _redondear(self.saldo_local / self.tasa_cambio)
 
+    @property
+    def personalizada(self) -> bool:
+        return bool(self.cliente_documento)
+
+    @property
+    def igtf_local(self) -> Decimal:
+        return sum((p.igtf_local for p in self.pagos.all()), Decimal("0.00"))
+
+    @property
+    def total_con_igtf_local(self) -> Decimal:
+        return self.total_local + self.igtf_local
+
+    def calcular_impuestos(self) -> None:
+        """Los precios incluyen IVA: separa base imponible e impuesto del total (después del descuento)."""
+        porcentaje = Decimal(settings.IVA_PORCENTAJE)
+        self.iva_porcentaje = porcentaje
+        self.base_imponible_local = _redondear(self.total_local / (1 + porcentaje / 100))
+        self.iva_local = self.total_local - self.base_imponible_local
+
+    def guardar_datos_cliente(self, datos: dict | None) -> None:
+        """Datos de factura personalizada ya validados (ver `datos_cliente_validos`); None = consumidor final."""
+        datos = datos or {}
+        for campo in ("nombre", "documento", "direccion", "telefono", "correo"):
+            setattr(self, f"cliente_{campo}", datos.get(campo, ""))
+        self.save(update_fields=["cliente_nombre", "cliente_documento", "cliente_direccion", "cliente_telefono",
+                                 "cliente_correo"])
+
     @classmethod
     @transaction.atomic
-    def emitir_desde_pedido(cls, pedido: Pedido, cajero) -> "Factura":
+    def emitir_desde_pedido(cls, pedido: Pedido, cajero, tasa=None) -> "Factura":
+        """Emite la factura. `tasa` (valor) permite respetar la de un pedido en línea ya pagado."""
         pedido = Pedido.objects.select_for_update().select_related("mesa").get(pk=pedido.pk)
         if pedido.estado in {Pedido.Estado.ANULADO, Pedido.Estado.CERRADO}:
             raise ValidationError("No se puede facturar un pedido cerrado o anulado.")
@@ -121,7 +174,7 @@ class Factura(models.Model):
         total_local = _redondear(pedido.subtotal)
         if total_local <= 0:
             raise ValidationError("El total del pedido es cero; no se puede facturar.")
-        tasa = TasaCambio.vigente()
+        tasa = TasaCambio(valor=Decimal(tasa)) if tasa is not None else TasaCambio.vigente()
         factura = None
         for _ in range(cls.INTENTOS_NUMERO):
             try:
@@ -143,6 +196,11 @@ class Factura(models.Model):
                 # Otro cajero tomó el mismo correlativo: se recalcula y se reintenta.
         if factura is None:
             raise ValidationError("No se pudo asignar el número de factura. Intenta de nuevo.")
+        factura.calcular_impuestos()
+        factura.save(update_fields=["iva_porcentaje", "base_imponible_local", "iva_local"])
+        cuenta = SolicitudCuenta.activa_de(pedido)
+        if cuenta is not None and cuenta.datos_cliente:
+            factura.guardar_datos_cliente(cuenta.datos_cliente)
         if pedido.mesa and pedido.mesa.estado != Mesa.Estado.POR_FACTURAR:
             pedido.mesa.marcar_por_facturar()
         return factura
@@ -177,6 +235,86 @@ class Factura(models.Model):
             factura.registrar_pago_completo_y_cerrar()
         return pago, factura
 
+    MAX_PAGOS_MIXTOS = 5
+
+    @transaction.atomic
+    def cobrar_mixto(self, pagos: list[dict], pagador: str = ""):
+        """Pago mixto: varios métodos en una sola operación (todo o nada).
+
+        `pagos` = [{"metodo", "monto", "referencia"}, …]. Se aplican primero los métodos sin vuelto
+        (pago móvil, tarjeta) y al final el efectivo y la divisa, de modo que el vuelto, si lo hay,
+        salga del último pago en efectivo. Si un pago sobra o es inválido, no se registra ninguno.
+        """
+        if not pagos:
+            raise ValidationError("Indica al menos un pago.")
+        if len(pagos) > self.MAX_PAGOS_MIXTOS:
+            raise ValidationError(f"Un pago mixto admite hasta {self.MAX_PAGOS_MIXTOS} métodos.")
+        con_vuelto = {Pago.Metodo.EFECTIVO, Pago.Metodo.DIVISA}
+        orden = sorted(enumerate(pagos), key=lambda par: (par[1]["metodo"] in con_vuelto, par[0]))
+        registrados, factura = [], self
+        for posicion, (_, p) in enumerate(orden, start=1):
+            actual = Factura.objects.get(pk=self.pk)
+            if actual.estado != self.Estado.ABIERTA:
+                raise ValidationError(
+                    f"Sobra un pago: con los primeros {posicion - 1} ya se cubrió el total. Revisa los montos."
+                )
+            pago, factura = factura.cobrar(metodo=p["metodo"], monto=p["monto"], referencia=p.get("referencia", ""),
+                                           pagador=pagador)
+            registrados.append(pago)
+        return registrados, factura
+
+    # ---- descuentos --------------------------------------------------------------------------
+    @transaction.atomic
+    def aplicar_descuento(self, *, tipo: str, valor: Decimal, motivo: str, usuario) -> Decimal:
+        """Descuento sobre la cuenta (porcentaje, dólares o bolívares). Solo antes de registrar pagos."""
+        factura = Factura.objects.select_for_update().get(pk=self.pk)
+        if factura.estado != self.Estado.ABIERTA:
+            raise ValidationError("Solo se aplican descuentos a facturas abiertas.")
+        if factura.pagos.exists():
+            raise ValidationError("La factura ya tiene pagos: el descuento se aplica antes de cobrar.")
+        motivo = " ".join((motivo or "").split())[:200]
+        if not motivo:
+            raise ValidationError("Indica el motivo del descuento (cortesía, cliente frecuente, error en el pedido…).")
+        if valor is None or valor <= 0:
+            raise ValidationError("El descuento debe ser mayor a cero.")
+        if tipo == "porcentaje":
+            if valor > 100:
+                raise ValidationError("El porcentaje no puede pasar de 100.")
+            descuento = _redondear(factura.subtotal_local * valor / 100)
+        elif tipo == "usd":
+            descuento = _redondear(valor * factura.tasa_cambio)
+        elif tipo == "bs":
+            descuento = _redondear(valor)
+        else:
+            raise ValidationError("Tipo de descuento no válido.")
+        if descuento > factura.subtotal_local:
+            raise ValidationError("El descuento no puede superar el total de la cuenta.")
+        factura.descuento_local = descuento
+        factura.descuento_motivo = motivo
+        factura.descuento_por = usuario
+        factura.total_local = factura.subtotal_local - descuento
+        factura.total_usd = _redondear(factura.total_local / factura.tasa_cambio)
+        factura.calcular_impuestos()
+        factura.save(update_fields=["descuento_local", "descuento_motivo", "descuento_por", "total_local", "total_usd",
+                                    "iva_porcentaje", "base_imponible_local", "iva_local"])
+        if factura.total_local <= 0:
+            factura.registrar_pago_completo_y_cerrar()  # cortesía total: la cuenta queda saldada
+        return descuento
+
+    @transaction.atomic
+    def quitar_descuento(self) -> None:
+        factura = Factura.objects.select_for_update().get(pk=self.pk)
+        if factura.estado != self.Estado.ABIERTA or factura.pagos.exists():
+            raise ValidationError("Solo se quita el descuento de una factura abierta y sin pagos.")
+        factura.descuento_local = Decimal("0.00")
+        factura.descuento_motivo = ""
+        factura.descuento_por = None
+        factura.total_local = factura.subtotal_local
+        factura.total_usd = _redondear(factura.total_local / factura.tasa_cambio)
+        factura.calcular_impuestos()
+        factura.save(update_fields=["descuento_local", "descuento_motivo", "descuento_por", "total_local", "total_usd",
+                                    "iva_porcentaje", "base_imponible_local", "iva_local"])
+
     @transaction.atomic
     def registrar_pago_completo_y_cerrar(self) -> None:
         if self.saldo_local > Decimal("0.00"):
@@ -187,6 +325,8 @@ class Factura(models.Model):
         self.estado = self.Estado.PAGADA
         self.pagada_en = ahora
         self.save(update_fields=["estado", "pagada_en"])
+        if self.pedido.en_linea:
+            return  # se pagó por adelantado: la comanda se cierra cuando el cliente la retira
         self.pedido.estado = Pedido.Estado.CERRADO
         self.pedido.cerrado_en = ahora
         self.pedido.save(update_fields=["estado", "cerrado_en", "actualizado_en"])
@@ -331,8 +471,12 @@ class Pago(models.Model):
         PAGO_MOVIL = "PMO", "Pago móvil (Bs.)"
         DIVISA = "DIV", "Divisa (USD en efectivo)"
         TARJETA = "TAR", "Tarjeta (Bs.)"
+        BINANCE = "BIN", "Binance Pay (USD)"
+        ZINLI = "ZIN", "Zinli (USD)"
 
-    METODOS_CON_REFERENCIA = {Metodo.PAGO_MOVIL, Metodo.TARJETA}
+    METODOS_USD = {Metodo.DIVISA, Metodo.BINANCE, Metodo.ZINLI}
+    METODOS_CON_REFERENCIA = {Metodo.PAGO_MOVIL, Metodo.TARJETA, Metodo.BINANCE, Metodo.ZINLI}
+    METODOS_DIGITALES = (Metodo.PAGO_MOVIL, Metodo.BINANCE, Metodo.ZINLI)  # el cliente paga desde su teléfono
 
     factura = models.ForeignKey(Factura, on_delete=models.PROTECT, related_name="pagos")
     moneda = models.CharField(max_length=3, choices=Moneda.choices)
@@ -355,6 +499,10 @@ class Pago(models.Model):
         help_text="Equivalente en moneda local aplicado a la factura.",
     )
     vuelto_local = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    igtf_local = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00"),
+        help_text="IGTF cobrado sobre este pago en divisas (no reduce la deuda: es impuesto).",
+    )
     registrado_en = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -365,11 +513,32 @@ class Pago(models.Model):
     def __str__(self) -> str:
         return f"{self.get_metodo_display()} {self.monto_recibido} → Factura {self.factura.numero}"
 
-    def _calcular(self):
-        """(moneda, equivalente_local, aplicado_local, vuelto_local) sin modificar el objeto."""
+    @property
+    def lleva_igtf(self) -> bool:
+        return self.metodo in settings.IGTF_METODOS
+
+    def _calcular_con_igtf(self):
+        """Divisa en efectivo: el cliente paga la deuda más el IGTF sobre la parte que cubre."""
         tasa = Decimal(self.factura.tasa_cambio)
         saldo = self.factura.saldo_local
-        moneda = self.Moneda.USD if self.metodo == self.Metodo.DIVISA else self.Moneda.LOCAL
+        factor = 1 + Decimal(settings.IGTF_PORCENTAJE) / 100
+        equivalente = _redondear(self.monto_recibido * tasa)
+        necesario = _redondear(saldo * factor)  # deuda + IGTF
+        if saldo > 0 and (equivalente >= necesario or self.monto_recibido >= _redondear(necesario / tasa)):
+            aplicado, igtf = saldo, necesario - saldo
+            vuelto = max(equivalente - necesario, Decimal("0.00"))
+        else:
+            aplicado = min(_redondear(equivalente / factor), saldo)
+            igtf, vuelto = equivalente - aplicado, Decimal("0.00")
+        return self.Moneda.USD, equivalente, aplicado, vuelto, igtf
+
+    def _calcular(self):
+        """(moneda, equivalente_local, aplicado_local, vuelto_local) sin modificar el objeto."""
+        if self.lleva_igtf:
+            return self._calcular_con_igtf()[:4]
+        tasa = Decimal(self.factura.tasa_cambio)
+        saldo = self.factura.saldo_local
+        moneda = self.Moneda.USD if self.metodo in self.METODOS_USD else self.Moneda.LOCAL
         if moneda == self.Moneda.USD:
             equivalente = _redondear(self.monto_recibido * tasa)
             # Pagar exactamente el total en USD salda la cuenta aunque el redondeo difiera un centavo.
@@ -379,6 +548,9 @@ class Pago(models.Model):
             cubre = equivalente >= saldo
         aplicado = saldo if cubre else min(equivalente, saldo)
         vuelto = max(equivalente - saldo, Decimal("0.00"))
+        if self.metodo in self.METODOS_CON_REFERENCIA and moneda == self.Moneda.USD and cubre \
+                and self.monto_recibido <= _redondear(saldo / tasa):
+            vuelto = Decimal("0.00")  # Binance/Zinli por el total exacto: la diferencia es solo redondeo
         return moneda, equivalente, aplicado, vuelto
 
     def clean(self):
@@ -392,7 +564,7 @@ class Pago(models.Model):
             raise ValidationError("La factura no tiene saldo pendiente.")
         if self.metodo in self.METODOS_CON_REFERENCIA:
             if not self.referencia.strip():
-                raise ValidationError("Indica la referencia del pago móvil o el voucher de la tarjeta.")
+                raise ValidationError("Indica la referencia del pago (pago móvil, Binance, Zinli) o el voucher de la tarjeta.")
             if self._calcular()[3] > 0:
                 raise ValidationError("El monto excede el saldo; con este método no se entrega vuelto.")
 
@@ -400,8 +572,69 @@ class Pago(models.Model):
         if self._state.adding:
             if self.factura.saldo_local <= 0:
                 raise ValidationError("La factura no tiene saldo pendiente.")
-            self.moneda, _, self.monto_local, self.vuelto_local = self._calcular()
+            if self.lleva_igtf:
+                self.moneda, _, self.monto_local, self.vuelto_local, self.igtf_local = self._calcular_con_igtf()
+            else:
+                self.moneda, _, self.monto_local, self.vuelto_local = self._calcular()
         super().save(*args, **kwargs)
+
+
+class Propina(models.Model):
+    """Propina que deja una mesa: queda como saldo a favor del mesero que la atendió hasta que se le paga."""
+
+    factura = models.ForeignKey(Factura, on_delete=models.PROTECT, related_name="propinas")
+    mesero = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="propinas")
+    metodo = models.CharField(max_length=3, choices=Pago.Metodo.choices)
+    moneda = models.CharField(max_length=3, choices=Pago.Moneda.choices)
+    monto = models.DecimalField(max_digits=12, decimal_places=2, help_text="En la moneda en que se recibió.")
+    monto_local = models.DecimalField(max_digits=12, decimal_places=2)
+    monto_usd = models.DecimalField(max_digits=12, decimal_places=2)
+    registrada_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="propinas_registradas")
+    registrada_en = models.DateTimeField(auto_now_add=True)
+    pagada = models.BooleanField(default=False)
+    pagada_en = models.DateTimeField(null=True, blank=True)
+    pagada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="propinas_entregadas"
+    )
+
+    class Meta:
+        verbose_name = "propina"
+        verbose_name_plural = "propinas"
+        ordering = ["-registrada_en"]
+        indexes = [models.Index(fields=["mesero", "pagada"])]
+
+    def __str__(self) -> str:
+        return f"Propina {self.monto} {self.get_moneda_display()} · {self.mesero}"
+
+    @classmethod
+    @transaction.atomic
+    def registrar(cls, factura: "Factura", *, metodo: str, monto: Decimal, usuario) -> "Propina":
+        if metodo not in Pago.Metodo.values:
+            raise ValidationError("Método de la propina no válido.")
+        if monto is None or not monto.is_finite() or monto <= 0 or monto >= Decimal("1000000"):
+            raise ValidationError("La propina debe ser un monto mayor a cero.")
+        if factura.estado == Factura.Estado.ANULADA:
+            raise ValidationError("La factura está anulada: no admite propinas.")
+        en_usd = metodo in Pago.METODOS_USD
+        tasa = Decimal(factura.tasa_cambio)
+        return cls.objects.create(
+            factura=factura,
+            mesero_id=factura.pedido.mesero_id,
+            metodo=metodo,
+            moneda=Pago.Moneda.USD if en_usd else Pago.Moneda.LOCAL,
+            monto=_redondear(monto),
+            monto_local=_redondear(monto * tasa) if en_usd else _redondear(monto),
+            monto_usd=_redondear(monto) if en_usd else _redondear(monto / tasa),
+            registrada_por=usuario,
+        )
+
+    @classmethod
+    @transaction.atomic
+    def marcar_pagadas(cls, propinas, usuario) -> int:
+        """Marca como entregadas al mesero las propinas pendientes indicadas. Devuelve cuántas."""
+        return cls.objects.filter(pk__in=[p.pk for p in propinas], pagada=False).update(
+            pagada=True, pagada_en=timezone.now(), pagada_por=usuario
+        )
 
 
 class Devolucion(models.Model):
@@ -432,7 +665,7 @@ class Devolucion(models.Model):
     def desde_pago(cls, pago: Pago, motivo: str, usuario) -> "Devolucion":
         """Se devuelve lo que realmente se aplicó a la cuenta (el vuelto ya se había entregado)."""
         if pago.moneda == Pago.Moneda.USD:
-            monto = min(pago.monto_recibido, _redondear(pago.monto_local / pago.factura.tasa_cambio))
+            monto = min(pago.monto_recibido, _redondear((pago.monto_local + pago.igtf_local) / pago.factura.tasa_cambio))
         else:
             monto = pago.monto_local
         return cls.objects.create(
@@ -528,7 +761,7 @@ class CierreCaja(models.Model):
             )
         if "facturas" in d:
             facturas = [
-                {**f, "total_local": dec(f["total_local"]), "total_usd": dec(f["total_usd"]),
+                {**f, "total_local": dec(f["total_local"]), "total_usd": dec(f["total_usd"]), "descuento_local": dec(f.get("descuento_local")),
                  "pagada_en": parse_datetime(f["pagada_en"]) if f.get("pagada_en") else None}
                 for f in d["facturas"]
             ]
@@ -549,6 +782,13 @@ class CierreCaja(models.Model):
             "vuelto_local": dec(d.get("vuelto_local")),
             "efectivo_bs_neto": dec(d.get("efectivo_bs_neto")),
             "divisas_usd": dec(d.get("divisas_usd")),
+            "descuentos_local": dec(d.get("descuentos_local")),
+            "propinas_local": dec(d.get("propinas_local")),
+            "iva_local": dec(d.get("iva_local")),
+            "base_local": dec(d.get("base_local")),
+            "igtf_local": dec(d.get("igtf_local")),
+            "propinas": [{**x, "monto": dec(x.get("monto")), "monto_local": dec(x.get("monto_local"))}
+                         for x in d.get("propinas", [])],
         }
 
     @classmethod
@@ -558,7 +798,7 @@ class CierreCaja(models.Model):
         pagos = Pago.objects.select_related("factura").filter(registrado_en__lte=hasta)
         devoluciones = Devolucion.objects.select_related("factura", "pago").filter(registrado_en__lte=hasta)
         # Una factura cobrada y luego devuelta se sigue contando en el período en que se cobró.
-        facturas = Factura.objects.select_related("pedido__mesa", "cajero").filter(
+        facturas = Factura.objects.select_related("pedido__mesa", "pedido__mesero", "cajero").filter(
             estado__in=[Factura.Estado.PAGADA, Factura.Estado.ANULADA], pagada_en__isnull=False, pagada_en__lte=hasta
         )
         anuladas = Factura.objects.filter(estado=Factura.Estado.ANULADA, anulada_en__lte=hasta)
@@ -595,6 +835,7 @@ class CierreCaja(models.Model):
         total_local = Decimal("0.00")
         total_usd = Decimal("0.00")
         vuelto_total = Decimal("0.00")
+        igtf_total = igtf_devuelto = Decimal("0.00")
         efectivo_bs = Decimal("0.00")
         divisas_usd = Decimal("0.00")
         devuelto_total_local = Decimal("0.00")
@@ -609,6 +850,7 @@ class CierreCaja(models.Model):
             total_local += pago.monto_local
             total_usd += _redondear(pago.monto_local / pago.factura.tasa_cambio)
             vuelto_total += pago.vuelto_local
+            igtf_total += pago.igtf_local
             if pago.metodo == Pago.Metodo.EFECTIVO:
                 efectivo_bs += pago.monto_recibido
             elif pago.metodo == Pago.Metodo.DIVISA:
@@ -623,6 +865,7 @@ class CierreCaja(models.Model):
             total_local -= dev.monto_local
             total_usd -= _redondear(dev.monto_local / dev.factura.tasa_cambio)
             devuelto_total_local += dev.monto_local
+            igtf_devuelto += dev.pago.igtf_local if dev.pago_id else Decimal("0.00")
             if dev.metodo == Pago.Metodo.EFECTIVO:
                 efectivo_bs -= dev.monto
             elif dev.metodo == Pago.Metodo.DIVISA:
@@ -630,6 +873,23 @@ class CierreCaja(models.Model):
 
         lineas = sorted(acumulado.values(), key=lambda x: x["metodo_label"])
         facturas = [_foto_factura(f) for f in facturas.order_by("pagada_en")]
+
+        # Propinas: entran a la caja pero se les deben a los meseros (se informan aparte).
+        propinas = Propina.objects.filter(registrada_en__lte=hasta)
+        if desde:
+            propinas = propinas.filter(registrada_en__gt=desde)
+        if cajero is not None:
+            propinas = propinas.filter(registrada_por=cajero)
+        por_metodo: dict[tuple[str, str], dict] = {}
+        for propina in propinas:
+            fila = por_metodo.setdefault((propina.metodo, propina.moneda), {
+                "metodo": propina.metodo, "metodo_label": Pago.Metodo(propina.metodo).label, "moneda": propina.moneda,
+                "cantidad": 0, "monto": Decimal("0.00"), "monto_local": Decimal("0.00"),
+            })
+            fila["cantidad"] += 1
+            fila["monto"] += propina.monto
+            fila["monto_local"] += propina.monto_local
+        propinas_lineas = sorted(por_metodo.values(), key=lambda x: x["metodo_label"])
         return {
             "desde": desde,
             "hasta": hasta,
@@ -645,6 +905,12 @@ class CierreCaja(models.Model):
             "vuelto_local": vuelto_total,
             "efectivo_bs_neto": efectivo_bs - vuelto_total,
             "divisas_usd": divisas_usd,
+            "descuentos_local": sum((f["descuento_local"] for f in facturas if f["estado"] != Factura.Estado.ANULADA), Decimal("0.00")),
+            "propinas": propinas_lineas,
+            "propinas_local": sum((x["monto_local"] for x in propinas_lineas), Decimal("0.00")),
+            "iva_local": sum((f["iva_local"] for f in facturas if f["estado"] != Factura.Estado.ANULADA), Decimal("0.00")),
+            "base_local": sum((f["base_local"] for f in facturas if f["estado"] != Factura.Estado.ANULADA), Decimal("0.00")),
+            "igtf_local": igtf_total - igtf_devuelto,
         }
 
     @classmethod
@@ -658,6 +924,7 @@ class CierreCaja(models.Model):
             or datos["cantidad_facturas"]
             or datos["facturas_anuladas"]
             or datos["cantidad_devoluciones"]
+            or datos["propinas"]
         ):
             raise ValidationError("No hay movimientos nuevos desde el último cierre.")
         tasa = TasaCambio.vigente()
@@ -685,6 +952,15 @@ class CierreCaja(models.Model):
                         "cantidad_pagos": datos["cantidad_pagos"],
                         "cantidad_devoluciones": datos["cantidad_devoluciones"],
                         "devuelto_local": str(datos["devuelto_local"]),
+                        "descuentos_local": str(datos["descuentos_local"]),
+                        "propinas_local": str(datos["propinas_local"]),
+                        "iva_local": str(datos["iva_local"]),
+                        "base_local": str(datos["base_local"]),
+                        "igtf_local": str(datos["igtf_local"]),
+                        "propinas": [
+                            {k: (str(v) if isinstance(v, Decimal) else v) for k, v in linea.items()}
+                            for linea in datos["propinas"]
+                        ],
                         "facturas": [
                             {k: (v.isoformat() if hasattr(v, "isoformat") else str(v) if isinstance(v, Decimal) else v)
                              for k, v in f.items()}
@@ -705,6 +981,186 @@ def _foto_factura(f: "Factura") -> dict:
         "cajero": f.cajero.username,
         "total_local": f.total_local,
         "total_usd": f.total_usd,
+        "descuento_local": f.descuento_local,
+        "iva_local": f.iva_local,
+        "base_local": f.base_imponible_local,
+        "mesero": f.pedido.mesero.username,
         "pagada_en": f.pagada_en,
         "estado": f.estado,
     }
+
+
+class SolicitudCuenta(models.Model):
+    """La mesa pide la cuenta desde el menú digital y dice cómo va a pagar.
+
+    Con pago móvil, Binance o Zinli el cliente ve los datos y el monto, paga desde su teléfono y
+    reporta la referencia: en caja solo se confirma que llegó. Con efectivo, divisa o tarjeta se le
+    indica que pase por caja. Así la cola de caja se acorta.
+    """
+
+    class Estado(models.TextChoices):
+        SOLICITADA = "SOL", "Cuenta solicitada"
+        REPORTADA = "REP", "Pago reportado"
+        CONFIRMADA = "CON", "Pago confirmado"
+        RECHAZADA = "REC", "Pago no encontrado"
+
+    ACTIVAS = (Estado.SOLICITADA, Estado.REPORTADA, Estado.RECHAZADA)
+
+    pedido = models.ForeignKey(Pedido, on_delete=models.CASCADE, related_name="solicitudes_cuenta")
+    metodo = models.CharField(max_length=3, choices=Pago.Metodo.choices)
+    estado = models.CharField(max_length=3, choices=Estado.choices, default=Estado.SOLICITADA)
+    monto_local = models.DecimalField(max_digits=12, decimal_places=2, help_text="Total a pagar en Bs. al pedirla.")
+    monto_usd = models.DecimalField(max_digits=12, decimal_places=2)
+    propina = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00"),
+        help_text="Propina que el cliente sumó al pagar, en la moneda del método.",
+    )
+    referencia = models.CharField(max_length=60, blank=True)
+    origen = models.CharField(max_length=80, blank=True, help_text="Banco o teléfono desde el que pagó (opcional).")
+    datos_cliente = models.JSONField(default=dict, blank=True, help_text="Datos de factura personalizada (vacío = genérica).")
+    creada_en = models.DateTimeField(auto_now_add=True)
+    actualizada_en = models.DateTimeField(auto_now=True)
+    revisada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="cuentas_revisadas"
+    )
+    pago = models.ForeignKey(Pago, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+
+    class Meta:
+        verbose_name = "solicitud de cuenta"
+        verbose_name_plural = "solicitudes de cuenta"
+        ordering = ["-creada_en"]
+        constraints = [
+            models.UniqueConstraint(fields=["pedido"], condition=Q(estado__in=["SOL", "REP", "REC"]),
+                                    name="uniq_solicitud_cuenta_activa"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Cuenta de {self.pedido.etiqueta} · {self.get_metodo_display()}"
+
+    @property
+    def es_digital(self) -> bool:
+        return self.metodo in Pago.METODOS_DIGITALES
+
+    @property
+    def en_usd(self) -> bool:
+        return self.metodo in Pago.METODOS_USD
+
+    @property
+    def monto(self) -> Decimal:
+        """Lo que el cliente debe transferir, en la moneda del método."""
+        return self.monto_usd if self.en_usd else self.monto_local
+
+    @property
+    def total_a_pagar(self) -> Decimal:
+        return self.monto + self.propina
+
+    @classmethod
+    def activa_de(cls, pedido) -> "SolicitudCuenta | None":
+        return cls.objects.filter(pedido=pedido, estado__in=cls.ACTIVAS).first()
+
+    @classmethod
+    @transaction.atomic
+    def pedir(cls, pedido, metodo: str, datos_cliente: dict | None = None) -> "SolicitudCuenta":
+        """Crea (o cambia de método) la solicitud de cuenta y pasa la mesa a «Por facturar»."""
+        if metodo not in Pago.Metodo.values:
+            raise ValidationError("Elige cómo vas a pagar.")
+        pedido = Pedido.objects.select_for_update().select_related("mesa").get(pk=pedido.pk)
+        pedido.solicitar_cuenta()
+        factura = pedido.factura_activa
+        if factura is not None:
+            if factura.estado != Factura.Estado.ABIERTA:
+                raise ValidationError("Tu cuenta ya está pagada. ¡Gracias por visitarnos!")
+            monto_local, tasa = factura.saldo_local, Decimal(factura.tasa_cambio)
+        else:
+            monto_local, tasa = _redondear(pedido.subtotal), TasaCambio.vigente().valor
+        # En dólares se redondea hacia arriba al centavo para que el pago siempre cubra el total.
+        monto_usd = (monto_local / tasa).quantize(CENTAVO, rounding="ROUND_CEILING")
+        actual = cls.objects.select_for_update().filter(pedido=pedido, estado__in=cls.ACTIVAS).first()
+        if actual is not None:
+            if actual.estado == cls.Estado.REPORTADA:
+                raise ValidationError("Ya reportaste tu pago: caja lo está verificando.")
+            actual.metodo, actual.monto_local, actual.monto_usd = metodo, monto_local, monto_usd
+            actual.estado, actual.referencia, actual.origen = cls.Estado.SOLICITADA, "", ""
+            actual.propina = Decimal("0.00")
+            actual.datos_cliente = datos_cliente or {}
+            actual.save()
+            solicitud = actual
+        else:
+            solicitud = cls.objects.create(pedido=pedido, metodo=metodo, monto_local=monto_local, monto_usd=monto_usd,
+                                           datos_cliente=datos_cliente or {})
+        if factura is not None and datos_cliente:
+            factura.guardar_datos_cliente(datos_cliente)
+        return solicitud
+
+    @transaction.atomic
+    def reportar(self, referencia: str, origen: str = "", propina: Decimal = Decimal("0.00")) -> None:
+        solicitud = SolicitudCuenta.objects.select_for_update().get(pk=self.pk)
+        if not solicitud.es_digital:
+            raise ValidationError("Con este método se paga en caja.")
+        if solicitud.estado not in (self.Estado.SOLICITADA, self.Estado.RECHAZADA):
+            raise ValidationError("Este pago ya fue reportado.")
+        referencia = " ".join((referencia or "").split())[:60]
+        if len(referencia) < 4:
+            raise ValidationError("Escribe la referencia completa del pago (al menos 4 caracteres).")
+        propina = _redondear(propina or Decimal("0.00"))
+        if propina < 0 or propina > solicitud.monto:
+            raise ValidationError("La propina debe ser un monto entre cero y el total de la cuenta.")
+        solicitud.referencia, solicitud.origen = referencia, " ".join((origen or "").split())[:80]
+        solicitud.propina = propina
+        solicitud.estado = self.Estado.REPORTADA
+        solicitud.save(update_fields=["referencia", "origen", "propina", "estado", "actualizada_en"])
+        self.refresh_from_db()
+
+    @transaction.atomic
+    def confirmar(self, factura: "Factura", usuario) -> Pago:
+        """Caja verificó que el dinero llegó: se registra el pago (y la propina, si la sumó) con la referencia del cliente."""
+        solicitud = SolicitudCuenta.objects.select_for_update().get(pk=self.pk)
+        if solicitud.estado != self.Estado.REPORTADA:
+            raise ValidationError("No hay un pago reportado pendiente de confirmar.")
+        if factura.pedido_id != solicitud.pedido_id:
+            raise ValidationError("El pago reportado es de otra cuenta.")
+        pago, _ = factura.cobrar(metodo=solicitud.metodo, monto=solicitud.monto, referencia=solicitud.referencia,
+                                 pagador=solicitud.origen)
+        if solicitud.propina > 0:
+            Propina.registrar(factura, metodo=solicitud.metodo, monto=solicitud.propina, usuario=usuario)
+        solicitud.estado, solicitud.revisada_por, solicitud.pago = self.Estado.CONFIRMADA, usuario, pago
+        solicitud.save(update_fields=["estado", "revisada_por", "pago", "actualizada_en"])
+        return pago
+
+    @transaction.atomic
+    def rechazar(self, usuario) -> None:
+        solicitud = SolicitudCuenta.objects.select_for_update().get(pk=self.pk)
+        if solicitud.estado != self.Estado.REPORTADA:
+            raise ValidationError("No hay un pago reportado pendiente de revisar.")
+        solicitud.estado, solicitud.revisada_por = self.Estado.RECHAZADA, usuario
+        solicitud.save(update_fields=["estado", "revisada_por", "actualizada_en"])
+
+
+def datos_cliente_validos(crudos) -> tuple[dict | None, str]:
+    """Valida los datos de una factura personalizada. Devuelve (datos limpios, error)."""
+    import re
+
+    from django.core.validators import validate_email
+
+    if not isinstance(crudos, dict):
+        return None, "Datos de factura no válidos."
+    limpio = {k: " ".join(str(crudos.get(k) or "").split()) for k in ("nombre", "documento", "direccion", "telefono", "correo")}
+    limpio["documento"] = limpio["documento"].upper().replace(" ", "")
+    if len(limpio["nombre"]) < 3:
+        return None, "Escribe el nombre o la razón social para la factura."
+    if not re.fullmatch(r"[VEJGP]-?\d{6,9}(-?\d)?", limpio["documento"]):
+        return None, "La cédula o el RIF no es válido (ej.: V-12345678 o J-123456789)."
+    if not re.match(r"^[VEJGP]-", limpio["documento"]):
+        limpio["documento"] = limpio["documento"][0] + "-" + limpio["documento"][1:]
+    if len(limpio["direccion"]) < 5:
+        return None, "Escribe la dirección fiscal para la factura."
+    if limpio["telefono"] and not re.fullmatch(r"[0-9+()\- ]{7,20}", limpio["telefono"]):
+        return None, "El teléfono no es válido."
+    if limpio["correo"]:
+        try:
+            validate_email(limpio["correo"])
+        except ValidationError:
+            return None, "El correo no es válido."
+    limpio["nombre"], limpio["direccion"] = limpio["nombre"][:120], limpio["direccion"][:200]
+    limpio["telefono"], limpio["correo"] = limpio["telefono"][:20], limpio["correo"][:254]
+    return limpio, ""

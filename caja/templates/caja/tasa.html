@@ -10,12 +10,19 @@
       <small>Tasa vigente</small>
       {% if vigente %}
         <strong>1 USD = {{ vigente.valor|floatformat:2 }} Bs</strong>
-        <span>Desde {{ vigente.vigente_desde|date:"d/m/Y H:i" }} · {{ vigente.creada_por.username }}</span>
+        <span>{% if vigente.fuente == "BCV" %}Oficial BCV{% if vigente.fecha_valor %} · fecha valor {{ vigente.fecha_valor|date:"d/m/Y" }}{% endif %}{% else %}Manual · {{ vigente.creada_por.username }}{% endif %} · desde {{ vigente.vigente_desde|date:"d/m/Y H:i" }}</span>
       {% else %}
         <strong>Sin tasa</strong>
         <span>Los meseros no pueden cargar platos hasta que publiques una.</span>
       {% endif %}
     </article>
+
+    <form class="card subir d1 pila" method="post" action="{% url 'caja:tasa_bcv' %}" style="gap: 10px">
+      {% csrf_token %}
+      <h2 style="margin:0">Tasa oficial del BCV</h2>
+      <p class="obs" style="margin:0">El sistema la consulta solo cada pocas horas y los precios en bolívares se recalculan con ella. Si quieres verificarla ahora:</p>
+      <button class="btn amarillo" type="submit">{% include "_icono.html" with nombre="tasa" %}Actualizar desde el BCV</button>
+    </form>
 
     {% if propuesta %}
       <form class="card subir d2" method="post" action="{% url 'caja:guardar_tasa' %}" style="border: 2px solid var(--amarillo-700)">
@@ -33,7 +40,7 @@
 
     <form class="card subir d2" method="post" action="{% url 'caja:guardar_tasa' %}">
       {% csrf_token %}
-      <h2>Publicar nueva tasa</h2>
+      <h2>Publicar una tasa manual</h2>
       <label for="valor" style="margin-top:0">Bolívares por 1 USD</label>
       <div class="monto-grande">
         <span>Bs</span>
@@ -48,14 +55,14 @@
     <h2>Historial</h2>
     <div class="tabla-caja">
       <table>
-        <thead><tr><th>Valor</th><th>Desde</th><th>Estado</th><th>Usuario</th></tr></thead>
+        <thead><tr><th>Valor</th><th>Desde</th><th>Estado</th><th>Origen</th></tr></thead>
         <tbody>
           {% for t in tasas %}
             <tr>
               <td class="num fuerte">{{ t.valor|floatformat:4 }}</td>
               <td>{{ t.vigente_desde|date:"d/m/Y H:i" }}</td>
               <td>{% if t.activa %}<span class="pill ok">Activa</span>{% else %}<span class="pill gris">Histórica</span>{% endif %}</td>
-              <td>{{ t.creada_por.username }}</td>
+              <td>{% if t.fuente == "BCV" %}BCV{% else %}{{ t.creada_por.username|default:"Manual" }}{% endif %}</td>
             </tr>
           {% empty %}
             <tr><td colspan="4" class="obs">Todavía no se ha publicado ninguna tasa.</td></tr>

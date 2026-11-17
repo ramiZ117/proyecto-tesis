@@ -11,7 +11,7 @@ from caja.models import Factura, Pago, TasaCambio
 from cocina.models import PedidoKDS
 from config.base_pruebas import DatosBase
 from config.panel import indicadores
-from inventario.admin import InsumoForm
+from gestion.forms import InsumoForm
 from inventario.models import Categoria, Insumo, MovimientoStock, Producto, Proveedor
 from inventario.servicios import (
     costos_de_platos,
@@ -419,7 +419,7 @@ class TasaYValidacionesTests(DatosBase):
     def test_la_interfaz_usa_la_marca_y_el_modo_cocina(self):
         r = self.cliente(self.chef).get("/cocina/")
         self.assertContains(r, 'class="modo-cocina"')
-        self.assertContains(r, "logo-el-amir.jpg")
+        self.assertContains(r, "logo-el-amir-icono.jpg")
         login = self.client.get("/login/")
         self.assertContains(login, "El Amir")
         self.assertContains(login, 'required')

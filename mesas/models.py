@@ -15,8 +15,16 @@ class Mesa(models.Model):
         POR_FACTURAR = "FAC", "Por facturar"
         POR_LIMPIAR = "LIM", "Por limpiar"
 
+    class Forma(models.TextChoices):
+        REDONDA = "RED", "Redonda"
+        CUADRADA = "CUA", "Cuadrada"
+        RECTANGULAR = "REC", "Rectangular (ocupa dos columnas)"
+        ARCO = "ARC", "Media luna"
+        BARRA = "BAR", "Barra"
+
     numero = models.PositiveIntegerField(unique=True)
     capacidad = models.PositiveSmallIntegerField(default=4)
+    forma = models.CharField(max_length=3, choices=Forma.choices, default=Forma.ARCO)
     estado = models.CharField(max_length=3, choices=Estado.choices, default=Estado.DISPONIBLE)
     activa = models.BooleanField(default=True)
     pos_x = models.PositiveSmallIntegerField(default=0, help_text="Columna en el mapa de mesas (0 = primera).")
@@ -33,6 +41,14 @@ class Mesa(models.Model):
     def _cambiar_estado(self, nuevo: str) -> None:
         self.estado = nuevo
         self.save(update_fields=["estado"])
+
+    @property
+    def ancho(self) -> int:
+        """Columnas que ocupa en el plano (la rectangular ocupa dos)."""
+        return 2 if self.forma == self.Forma.RECTANGULAR else 1
+
+    def celdas(self) -> set[tuple[int, int]]:
+        return {(self.pos_x + i, self.pos_y) for i in range(self.ancho)}
 
     def ocupar(self) -> None:
         self._cambiar_estado(self.Estado.OCUPADA)
@@ -72,6 +88,9 @@ class Pedido(models.Model):
     tipo = models.CharField(max_length=3, choices=Tipo.choices, default=Tipo.MESA)
     mesa = models.ForeignKey(Mesa, on_delete=models.PROTECT, related_name="pedidos", null=True, blank=True)
     cliente = models.CharField(max_length=80, blank=True, help_text="Nombre del cliente (pedidos para llevar).")
+    en_linea = models.BooleanField(
+        default=False, help_text="Pedido para retirar hecho y pagado desde el menú en línea."
+    )
     mesero = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -196,6 +215,44 @@ class Pedido(models.Model):
         return self.facturas.exclude(estado="ANU").first()
 
     # ---- acciones --------------------------------------------------------
+    @transaction.atomic
+    def agregar_promocion(self, promocion, veces: int = 1, total_local=None) -> list:
+        """Agrega un combo: una línea por unidad de cada plato, con el precio del combo repartido exacto.
+
+        Cocina e inventario las ven como platos normales; el total de las líneas es el precio del combo.
+        """
+        from caja.models import TasaCambio
+
+        self._exigir_abierto()
+        if veces < 1 or veces > 20:
+            raise ValidationError("Cantidad de promociones no válida.")
+        items = list(promocion.items.select_related("producto"))
+        if not promocion.activa or not items:
+            raise ValidationError("Esa promoción no está disponible.")
+        if any(not i.producto.disponible for i in items):
+            raise ValidationError("Algún plato de la promoción está fuera de la carta.")
+        total_combo = total_local if total_local is not None else TasaCambio.vigente().a_local(promocion.precio_usd)
+        unidades = [i.producto for i in items for _ in range(i.cantidad)]
+        normal = sum((p.precio_usd for p in unidades), Decimal("0"))
+        creados = []
+        for _ in range(veces):
+            grupo = (self.detalles.aggregate(m=models.Max("promo_grupo"))["m"] or 0) + 1
+            asignado = Decimal("0.00")
+            for n, producto in enumerate(unidades):
+                if n == len(unidades) - 1:
+                    precio = total_combo - asignado  # la última línea absorbe el redondeo
+                else:
+                    parte = producto.precio_usd / normal if normal else Decimal(1) / len(unidades)
+                    precio = (total_combo * parte).quantize(Decimal("0.01"))
+                asignado += precio
+                creados.append(DetallePedido.objects.create(
+                    pedido=self, producto=producto, cantidad=1, precio_unitario=max(precio, Decimal("0.00")),
+                    observaciones=f"Promo: {promocion.nombre}"[:250], promocion=promocion, promo_grupo=grupo,
+                ))
+        if self.mesa and self.mesa.estado != Mesa.Estado.OCUPADA:
+            self.mesa.ocupar()
+        return creados
+
     def _exigir_abierto(self) -> None:
         if self.estado in {self.Estado.CERRADO, self.Estado.ANULADO}:
             raise ValidationError("Este pedido ya está cerrado o anulado.")
@@ -313,8 +370,14 @@ class DetallePedido(models.Model):
     estado = models.CharField(max_length=3, choices=Estado.choices, default=Estado.PENDIENTE)
     enviado = models.BooleanField(default=False, help_text="True cuando el mesero lo envió a cocina.")
     enviado_en = models.DateTimeField(null=True, blank=True)
+    preparacion_en = models.DateTimeField(null=True, blank=True, help_text="Momento en que cocina empezó a prepararlo.")
     listo_en = models.DateTimeField(null=True, blank=True, help_text="Momento en que cocina lo marcó listo.")
     insumos_descontados = models.BooleanField(default=False)
+    promocion = models.ForeignKey(
+        "inventario.Promocion", on_delete=models.SET_NULL, null=True, blank=True, related_name="detalles_pedido",
+        help_text="Combo al que pertenece la línea (su precio es la parte del precio del combo).",
+    )
+    promo_grupo = models.PositiveIntegerField(null=True, blank=True, help_text="Agrupa las líneas de un mismo combo.")
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
 
@@ -339,6 +402,8 @@ class DetallePedido(models.Model):
     def cambiar_cantidad(self, delta: int) -> None:
         """Suma o resta unidades a un platillo aún sin enviar; en cero se quita de la comanda."""
         self.pedido._exigir_abierto()
+        if self.promo_grupo:
+            raise ValidationError("Es parte de una promoción: quita la promoción completa o agrégala otra vez.")
         if self.enviado:
             raise ValidationError("Ese platillo ya se envió a cocina; agrega uno nuevo o quítalo.")
         nueva = self.cantidad + delta
@@ -349,8 +414,21 @@ class DetallePedido(models.Model):
         self.save(update_fields=["cantidad", "actualizado_en"])
 
     def cancelar(self) -> None:
-        """Quita el platillo mientras cocina no lo haya empezado."""
+        """Quita el platillo mientras cocina no lo haya empezado (una promoción se quita completa)."""
         self.pedido._exigir_abierto()
+        if self.promo_grupo:
+            grupo = list(self.pedido.detalles.filter(promo_grupo=self.promo_grupo).exclude(estado=self.Estado.ANULADO))
+            if any(d.estado != self.Estado.PENDIENTE for d in grupo):
+                raise ValidationError("Cocina ya empezó parte de esta promoción: no se puede quitar.")
+            with transaction.atomic():
+                for d in grupo:
+                    if d.enviado:
+                        d.estado = self.Estado.ANULADO
+                        d.save(update_fields=["estado", "actualizado_en"])
+                    else:
+                        d.delete()
+                self.pedido.sincronizar_estado_desde_detalles()
+            return
         if self.estado != self.Estado.PENDIENTE:
             raise ValidationError("Solo se pueden quitar platillos que cocina aún no empezó a preparar.")
         if not self.enviado:
@@ -369,7 +447,8 @@ class DetallePedido(models.Model):
         # Mientras tanto los insumos quedan "comprometidos" y no se ofrecen en el menú.
         with transaction.atomic():
             self.estado = self.Estado.EN_PREPARACION
-            self.save(update_fields=["estado", "actualizado_en"])
+            self.preparacion_en = timezone.now()
+            self.save(update_fields=["estado", "preparacion_en", "actualizado_en"])
             self.pedido.sincronizar_estado_desde_detalles()
 
     def marcar_listo(self) -> None:
@@ -425,3 +504,309 @@ class DetallePedido(models.Model):
             )
         self.insumos_descontados = True
         self.save(update_fields=["insumos_descontados", "actualizado_en"])
+
+
+class SolicitudCliente(models.Model):
+    """Pedido que arma el comensal en el menú digital y «Solicitar mesero».
+
+    No va a cocina: el mesero que atiende la mesa lo revisa con el cliente, lo carga en la comanda
+    (puede editarlo) y lo envía. Así la toma del pedido se reduce a confirmar.
+    """
+
+    class Estado(models.TextChoices):
+        PENDIENTE = "PEN", "Pendiente"
+        CARGADA = "CAR", "Cargada a la comanda"
+        DESCARTADA = "DES", "Descartada"
+
+    mesa = models.ForeignKey(Mesa, on_delete=models.PROTECT, related_name="solicitudes")
+    estado = models.CharField(max_length=3, choices=Estado.choices, default=Estado.PENDIENTE)
+    items = models.JSONField(default=list, blank=True, help_text="[{tipo: producto|promocion, id, cantidad, nota}]")
+    nota = models.CharField(max_length=200, blank=True)
+    creada_en = models.DateTimeField(auto_now_add=True)
+    actualizada_en = models.DateTimeField(auto_now=True)
+    atendida_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="solicitudes_atendidas"
+    )
+    atendida_en = models.DateTimeField(null=True, blank=True)
+    pedido = models.ForeignKey(Pedido, on_delete=models.SET_NULL, null=True, blank=True, related_name="solicitudes")
+
+    class Meta:
+        verbose_name = "solicitud del cliente"
+        verbose_name_plural = "solicitudes de clientes"
+        ordering = ["creada_en"]
+        constraints = [
+            models.UniqueConstraint(fields=["mesa"], condition=Q(estado="PEN"), name="uniq_solicitud_pendiente_por_mesa"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Solicitud de la {self.mesa}"
+
+    @property
+    def es_solo_llamado(self) -> bool:
+        return not self.items
+
+    def detalle(self) -> list[dict]:
+        """Ítems con sus objetos (los que ya no existen o salieron de la carta se marcan)."""
+        from inventario.models import Producto, Promocion
+
+        productos = Producto.objects.in_bulk([i["id"] for i in self.items if i.get("tipo") == "producto"])
+        promos = Promocion.objects.in_bulk([i["id"] for i in self.items if i.get("tipo") == "promocion"])
+        filas = []
+        for i in self.items:
+            obj = (productos if i.get("tipo") == "producto" else promos).get(i.get("id"))
+            if obj is None:
+                valido = False
+            elif i.get("tipo") == "producto":
+                valido = obj.disponible
+            else:
+                valido = Promocion.vigentes().filter(pk=obj.pk).exists() and obj.disponible
+            filas.append({**i, "obj": obj, "valido": valido})
+        return filas
+
+    @transaction.atomic
+    def cargar_en(self, pedido: "Pedido", usuario) -> tuple[int, list[str]]:
+        """Pasa los ítems a la comanda como platos sin enviar. Devuelve (agregados, avisos)."""
+        from config.dinero import precio_local_vigente
+        from inventario.servicios import disponibilidad_menu
+
+        solicitud = SolicitudCliente.objects.select_for_update().get(pk=self.pk)
+        if solicitud.estado != self.Estado.PENDIENTE:
+            raise ValidationError("Esta solicitud ya fue atendida.")
+        if pedido.mesa_id != solicitud.mesa_id:
+            raise ValidationError("La solicitud es de otra mesa.")
+        pedido._exigir_abierto()
+        agregados, avisos = 0, []
+        porciones = disponibilidad_menu()
+        for fila in solicitud.detalle():
+            obj, cantidad = fila["obj"], int(fila.get("cantidad") or 1)
+            if not fila["valido"]:
+                avisos.append(f"{getattr(obj, 'nombre', 'Un plato')} ya no está disponible y no se cargó.")
+                continue
+            if fila["tipo"] == "promocion":
+                pedido.agregar_promocion(obj, cantidad)
+                agregados += cantidad
+                continue
+            libres = porciones.get(obj.pk)
+            if libres is not None and libres < cantidad:
+                if libres <= 0:
+                    avisos.append(f"{obj.nombre} está agotado y no se cargó.")
+                    continue
+                avisos.append(f"De {obj.nombre} solo quedaban {libres}: se cargaron {libres}.")
+                cantidad = libres
+            DetallePedido.objects.create(
+                pedido=pedido, producto=obj, cantidad=cantidad, precio_unitario=precio_local_vigente(obj.precio_usd),
+                observaciones=(fila.get("nota") or "")[:250],
+            )
+            porciones[obj.pk] = (libres - cantidad) if libres is not None else None
+            agregados += cantidad
+        if solicitud.nota:
+            pedido.notas = (f"{pedido.notas} · " if pedido.notas else "") + f"Cliente: {solicitud.nota}"
+            pedido.notas = pedido.notas[:250]
+            pedido.save(update_fields=["notas", "actualizado_en"])
+        solicitud.estado = self.Estado.CARGADA
+        solicitud.atendida_por = usuario
+        solicitud.atendida_en = timezone.now()
+        solicitud.pedido = pedido
+        solicitud.save(update_fields=["estado", "atendida_por", "atendida_en", "pedido", "actualizada_en"])
+        return agregados, avisos
+
+    @transaction.atomic
+    def descartar(self, usuario) -> None:
+        solicitud = SolicitudCliente.objects.select_for_update().get(pk=self.pk)
+        if solicitud.estado != self.Estado.PENDIENTE:
+            raise ValidationError("Esta solicitud ya fue atendida.")
+        solicitud.estado = self.Estado.DESCARTADA
+        solicitud.atendida_por = usuario
+        solicitud.atendida_en = timezone.now()
+        solicitud.save(update_fields=["estado", "atendida_por", "atendida_en", "actualizada_en"])
+
+
+def _almacen_privado():
+    """Comprobantes de pago: fuera de /media/ (no tienen dirección pública); solo caja los abre."""
+    import os
+
+    from django.core.files.storage import FileSystemStorage
+
+    class AlmacenPrivado(FileSystemStorage):
+        @property
+        def base_location(self):  # se lee en cada uso para respetar la configuración vigente
+            return str(settings.PRIVADO_ROOT)
+
+        @property
+        def location(self):
+            return os.path.abspath(self.base_location)
+
+    return AlmacenPrivado()
+
+
+class PedidoEnLinea(models.Model):
+    """Pedido para retirar en el local, hecho desde el menú en línea (enlace general, sin QR de mesa).
+
+    El cliente paga por pago móvil, Binance o Zinli y sube el comprobante. Caja verifica el pago y lo
+    manda a cocina; cuando cocina lo marca listo, caja avisa al cliente para que lo retire.
+    """
+
+    class Estado(models.TextChoices):
+        POR_VERIFICAR = "VER", "Pago por verificar"
+        RECHAZADO = "REC", "Pago rechazado"
+        ACEPTADO = "ACE", "Pago verificado"
+        ENTREGADO = "ENT", "Entregado"
+
+    token = models.CharField(max_length=32, unique=True, editable=False)
+    estado = models.CharField(max_length=3, choices=Estado.choices, default=Estado.POR_VERIFICAR)
+    cliente_nombre = models.CharField(max_length=80)
+    cliente_telefono = models.CharField(max_length=20)
+    cliente_correo = models.EmailField(blank=True)
+    datos_factura = models.JSONField(default=dict, blank=True, help_text="Datos fiscales si pidió factura personalizada.")
+    items = models.JSONField(default=list)
+    nota = models.CharField(max_length=200, blank=True)
+    metodo = models.CharField(max_length=3)
+    tasa = models.DecimalField(max_digits=14, decimal_places=4)
+    monto_local = models.DecimalField(max_digits=12, decimal_places=2)
+    monto_usd = models.DecimalField(max_digits=12, decimal_places=2)
+    referencia = models.CharField(max_length=60)
+    comprobante = models.FileField(upload_to="comprobantes/", storage=_almacen_privado)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    revisado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="pedidos_en_linea_revisados"
+    )
+    revisado_en = models.DateTimeField(null=True, blank=True)
+    motivo_rechazo = models.CharField(max_length=200, blank=True)
+    avisado_en = models.DateTimeField(null=True, blank=True)
+    entregado_en = models.DateTimeField(null=True, blank=True)
+    pedido = models.OneToOneField(Pedido, on_delete=models.SET_NULL, null=True, blank=True, related_name="en_linea_origen")
+
+    class Meta:
+        verbose_name = "pedido en línea"
+        verbose_name_plural = "pedidos en línea"
+        ordering = ["creado_en"]
+
+    def __str__(self) -> str:
+        return f"{self.codigo} · {self.cliente_nombre}"
+
+    def save(self, *args, **kwargs):
+        if not self.token:
+            import secrets
+
+            self.token = secrets.token_hex(16)
+        super().save(*args, **kwargs)
+
+    @property
+    def codigo(self) -> str:
+        return f"R-{self.pk:04d}" if self.pk else "R-nuevo"
+
+    @property
+    def en_usd(self) -> bool:
+        from caja.models import Pago
+
+        return self.metodo in Pago.METODOS_USD
+
+    @property
+    def monto(self):
+        return self.monto_usd if self.en_usd else self.monto_local
+
+    @property
+    def metodo_nombre(self) -> str:
+        from caja.models import Pago
+
+        return Pago.Metodo(self.metodo).label if self.metodo in Pago.Metodo.values else self.metodo
+
+    @property
+    def etapa(self) -> str:
+        """Para el cliente y la caja: verificar, rechazado, cocina, listo, entregado."""
+        if self.estado == self.Estado.POR_VERIFICAR:
+            return "verificar"
+        if self.estado == self.Estado.RECHAZADO:
+            return "rechazado"
+        if self.estado == self.Estado.ENTREGADO:
+            return "entregado"
+        if self.pedido and self.pedido.estado in (Pedido.Estado.LISTO, Pedido.Estado.ENTREGADO):
+            return "listo"
+        return "cocina"
+
+    def lineas(self) -> list[dict]:
+        """Ítems con nombre para mostrarlos (los datos se guardaron al hacer el pedido)."""
+        return [{"cantidad": i["cantidad"], "nombre": i.get("nombre", "?"), "nota": i.get("nota", "")} for i in self.items]
+
+    @transaction.atomic
+    def aceptar(self, cajero):
+        """Caja verificó el pago: se crea la comanda, va a cocina y se factura y cobra con la tasa del pedido."""
+        from caja.models import Factura, Pago
+        from inventario.models import Producto, Promocion
+        from inventario.servicios import disponibilidad_menu
+
+        actual = PedidoEnLinea.objects.select_for_update().get(pk=self.pk)
+        if actual.estado != self.Estado.POR_VERIFICAR:
+            raise ValidationError("Este pedido ya fue revisado.")
+        porciones = disponibilidad_menu()
+        necesarias = {}
+        for item in actual.items:
+            if item["tipo"] == "producto":
+                necesarias[item["id"]] = necesarias.get(item["id"], 0) + item["cantidad"]
+            else:
+                promo = Promocion.objects.prefetch_related("items").filter(pk=item["id"]).first()
+                for pi in promo.items.all() if promo else []:
+                    necesarias[pi.producto_id] = necesarias.get(pi.producto_id, 0) + pi.cantidad * item["cantidad"]
+        faltan = [pk for pk, cant in necesarias.items() if porciones.get(pk) is not None and porciones[pk] < cant]
+        if faltan:
+            nombres = ", ".join(Producto.objects.filter(pk__in=faltan).values_list("nombre", flat=True))
+            raise ValidationError(f"No alcanza el inventario para: {nombres}. Llama al cliente o rechaza el pedido.")
+
+        pedido = Pedido.objects.create(
+            tipo=Pedido.Tipo.LLEVAR, cliente=f"{actual.cliente_nombre} (en línea)"[:80], mesero=cajero, en_linea=True,
+            notas=actual.nota[:250],
+        )
+        for item in actual.items:
+            if item["tipo"] == "producto":
+                DetallePedido.objects.create(
+                    pedido=pedido, producto_id=item["id"], cantidad=item["cantidad"],
+                    precio_unitario=Decimal(item["precio_local"]), observaciones=(item.get("nota") or "")[:250],
+                )
+            else:
+                promo = Promocion.objects.get(pk=item["id"])
+                pedido.agregar_promocion(promo, item["cantidad"], total_local=Decimal(item["precio_local"]))
+        pedido.enviar_a_cocina()
+        factura = Factura.emitir_desde_pedido(pedido, cajero, tasa=actual.tasa)
+        if actual.datos_factura:
+            factura.guardar_datos_cliente(actual.datos_factura)
+        if actual.cliente_correo and not factura.cliente_correo:
+            factura.cliente_correo = actual.cliente_correo
+            factura.save(update_fields=["cliente_correo"])
+        factura.cobrar(metodo=actual.metodo, monto=actual.monto, referencia=actual.referencia,
+                       pagador=actual.cliente_nombre)
+        factura.refresh_from_db()
+        if factura.estado != Factura.Estado.PAGADA:
+            raise ValidationError("El pago no cubre el total del pedido; revísalo con el cliente.")
+        actual.estado, actual.revisado_por, actual.revisado_en, actual.pedido = (
+            self.Estado.ACEPTADO, cajero, timezone.now(), pedido)
+        actual.save(update_fields=["estado", "revisado_por", "revisado_en", "pedido"])
+        self.refresh_from_db()
+        return factura
+
+    @transaction.atomic
+    def rechazar(self, cajero, motivo: str) -> None:
+        actual = PedidoEnLinea.objects.select_for_update().get(pk=self.pk)
+        if actual.estado != self.Estado.POR_VERIFICAR:
+            raise ValidationError("Este pedido ya fue revisado.")
+        motivo = " ".join((motivo or "").split())[:200]
+        if not motivo:
+            raise ValidationError("Indica el motivo del rechazo; el cliente lo verá.")
+        actual.estado, actual.motivo_rechazo = self.Estado.RECHAZADO, motivo
+        actual.revisado_por, actual.revisado_en = cajero, timezone.now()
+        actual.save(update_fields=["estado", "motivo_rechazo", "revisado_por", "revisado_en"])
+        self.refresh_from_db()
+
+    @transaction.atomic
+    def entregar(self) -> None:
+        """El cliente retiró su pedido: se cierra la comanda."""
+        actual = PedidoEnLinea.objects.select_for_update().select_related("pedido").get(pk=self.pk)
+        if actual.estado != self.Estado.ACEPTADO or actual.etapa != "listo":
+            raise ValidationError("Solo se entregan pedidos que cocina marcó como listos.")
+        pedido = actual.pedido
+        pedido.detalles.filter(estado=DetallePedido.Estado.LISTO).update(estado=DetallePedido.Estado.ENTREGADO)
+        pedido.estado, pedido.cerrado_en = Pedido.Estado.CERRADO, timezone.now()
+        pedido.save(update_fields=["estado", "cerrado_en", "actualizado_en"])
+        actual.estado, actual.entregado_en = self.Estado.ENTREGADO, timezone.now()
+        actual.save(update_fields=["estado", "entregado_en"])
+        self.refresh_from_db()
+

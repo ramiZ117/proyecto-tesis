@@ -12,7 +12,7 @@
   </div>
 {% endblock %}
 {% block content %}
-<div class="salon">
+<div class="salon{% if pedido %} con-comanda{% endif %}">
   <section class="salon-mapa">
     <div id="mapa" class="subir d1" data-refresco="{% url 'mesas:mapa_parcial' %}{% if pedido.mesa_id %}?sel={{ pedido.mesa_id }}{% endif %}">{% include "mesas/_mapa_grid.html" %}</div>
 

@@ -7,6 +7,7 @@
         <div class="obs">
           {% if pedido.es_para_llevar %}Para llevar{% else %}{{ pedido.mesa.capacidad }} personas{% endif %}
           · {{ pedido.mesero.username }} · abierta hace {{ pedido.creado_en|timesince }}
+          {% if minutos_estimados %}<span class="pill prep" style="margin-left: 4px">Listo en ~{{ minutos_estimados }} min</span>{% endif %}
         </div>
       </div>
       <span class="pill {% if pedido.estado == 'LIS' %}ok{% elif pedido.estado == 'ABI' %}warn{% else %}ocu{% endif %}">{{ pedido.get_estado_display }}</span>
@@ -45,10 +46,41 @@
     {% endif %}
   </div>
 
+  {% if solicitud and not facturado %}
+    <section class="solicitud-cliente" aria-label="Solicitud del cliente">
+      <div class="stack" style="justify-content: space-between">
+        <strong class="stack" style="gap: 6px">{% include "_icono.html" with nombre="campana" grosor="2.4" %}{% if solicitud.es_solo_llamado %}La mesa te está llamando{% else %}Pedido hecho desde el menú{% endif %}</strong>
+        <span class="obs">hace {{ solicitud.actualizada_en|timesince }}</span>
+      </div>
+      {% if solicitud.filas %}
+        <ul>
+          {% for f in solicitud.filas %}
+            <li class="{% if not f.valido %}tachado{% endif %}"><b>{{ f.cantidad }}×</b> {% if f.tipo == "promocion" %}<span class="pill warn">Promo</span> {% endif %}{{ f.obj.nombre|default:"Plato eliminado" }}{% if f.nota %} <span class="obs">· {{ f.nota }}</span>{% endif %}{% if not f.valido %} <span class="obs">(no disponible)</span>{% endif %}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if solicitud.nota %}<p class="obs" style="margin:0">Nota: {{ solicitud.nota }}</p>{% endif %}
+      <div class="stack">
+        {% if not solicitud.es_solo_llamado %}
+          <form method="post" action="{% url 'mesas:cargar_solicitud' solicitud.pk %}" style="flex: 2 1 180px; display: flex">
+            {% csrf_token %}<button class="btn bloque" type="submit">{% include "_icono.html" with nombre="check" grosor="2.4" %}Confirmar y cargar a la comanda</button>
+          </form>
+        {% endif %}
+        <form method="post" action="{% url 'mesas:descartar_solicitud' solicitud.pk %}" style="flex: 1 1 120px; display: flex"{% if not solicitud.es_solo_llamado %} data-confirmar="¿Descartar lo que pidió el cliente desde el menú?" data-confirmar-peligro{% endif %}>
+          {% csrf_token %}<button class="btn secundario bloque" type="submit">{% if solicitud.es_solo_llamado %}Ya fui a la mesa{% else %}Descartar{% endif %}</button>
+        </form>
+      </div>
+      {% if not solicitud.es_solo_llamado %}<p class="hint" style="margin:0">Se cargan como «Sin enviar»: ajusta lo que el cliente cambie y luego toca «Enviar a cocina».</p>{% endif %}
+    </section>
+  {% endif %}
+
+  {% if cuenta_cliente %}
+    <p class="pill FAC" style="white-space: normal; margin: 0 0 10px">La mesa pidió la cuenta desde el menú: paga con {{ cuenta_cliente.get_metodo_display }}{% if cuenta_cliente.estado == "REP" %} (pago reportado, caja lo verifica){% endif %}.</p>
+  {% endif %}
   <div class="comanda-items">
     {% for d in detalles %}
       <div class="item-comanda">
-        {% if not d.enviado and not facturado %}
+        {% if not d.enviado and not facturado and not d.promocion_id %}
           <div class="cantidad">
             <form method="post" action="{% url 'mesas:cantidad' d.pk %}">{% csrf_token %}<input type="hidden" name="delta" value="-1"><button class="btn-icono" type="submit" aria-label="Quitar uno de {{ d.producto.nombre }}">{% include "_icono.html" with nombre="menos" grosor="2.6" %}</button></form>
             <span>{{ d.cantidad }}</span>
@@ -58,8 +90,24 @@
           <div class="cantidad"><span>{{ d.cantidad }}×</span></div>
         {% endif %}
         <div class="nombre">
-          <strong>{{ d.producto.nombre }}</strong>
+          <strong>{{ d.producto.nombre }}{% if d.promocion_id %} <span class="pill warn" title="{{ d.observaciones }}">Promo</span>{% endif %}</strong>
           <span class="obs">{% if d.observaciones %}{{ d.observaciones }}{% else %}Bs {{ d.subtotal|intcomma }}{% endif %}</span>
+          {% if not d.enviado and not d.promocion_id and not facturado %}
+            <details class="personalizar">
+              <summary>Personalizar</summary>
+              <form method="post" action="{% url 'mesas:personalizar' d.pk %}" class="pila" style="gap: 8px">
+                {% csrf_token %}
+                {% if d.producto.lista_opciones %}
+                  <div class="opciones-plato">
+                    {% for o in d.producto.lista_opciones %}<label><input type="checkbox" name="opcion" value="{{ o }}"{% if o in d.observaciones %} checked{% endif %}> {{ o }}</label>{% endfor %}
+                  </div>
+                {% endif %}
+                <label class="oculto" for="nota-{{ d.pk }}">Nota</label>
+                <input id="nota-{{ d.pk }}" name="nota" maxlength="120" placeholder="Otra indicación (opcional)">
+                <button class="btn sm" type="submit">Guardar</button>
+              </form>
+            </details>
+          {% endif %}
         </div>
         {% if not d.enviado %}<span class="pill nuevo">Sin enviar</span>
         {% elif d.estado == "PEN" %}<span class="pill cola">En cola</span>
@@ -67,6 +115,9 @@
         {% elif d.estado == "LIS" %}
           <form method="post" action="{% url 'mesas:entregar' d.pk %}">{% csrf_token %}<button class="btn sm" type="submit">{% include "_icono.html" with nombre="check" grosor="2.6" %}Entregar</button></form>
         {% else %}<span class="pill entregado">Entregado</span>{% endif %}
+        {% if not d.enviado and d.promocion_id and not facturado %}
+          <form method="post" action="{% url 'mesas:quitar' d.pk %}">{% csrf_token %}<button class="ghost" type="submit" aria-label="Quitar la promoción" title="Quitar la promoción completa">✕</button></form>
+        {% endif %}
         {% if d.estado == "PEN" and d.enviado and not facturado %}
           <form method="post" action="{% url 'mesas:quitar' d.pk %}">{% csrf_token %}<button class="ghost" type="submit" aria-label="Quitar {{ d.producto.nombre }}" title="Quitar">✕</button></form>
         {% endif %}
@@ -85,10 +136,24 @@
     </div>
     <div class="chips" role="group" aria-label="Categorías">
       <button class="chip" type="button" data-filtro-chip="carta" data-valor="" aria-pressed="true" data-recordar>Todo</button>
+      {% if promociones %}<button class="chip chip-promo" type="button" data-filtro-chip="carta" data-valor="promos" aria-pressed="false" data-recordar>Promociones</button>{% endif %}
       {% for categoria in categorias %}
         <button class="chip" type="button" data-filtro-chip="carta" data-valor="{{ categoria.pk }}" aria-pressed="false" data-recordar>{{ categoria.nombre }}</button>
       {% endfor %}
     </div>
+    {% if promociones %}
+      <form method="post" action="{% url 'mesas:agregar_promocion' pedido.pk %}" class="carta-grid" style="margin-bottom: 12px">
+        {% csrf_token %}
+        {% for promo in promociones %}
+          <button class="plato promo{% if promo.agotada %} agotado{% endif %}" type="submit" name="promocion_id" value="{{ promo.pk }}"
+                  data-filtrable="carta" data-categoria="promos" data-texto="{{ promo.nombre }} promo{% for i in promo.items.all %} {{ i.producto.nombre }}{% endfor %}"{% if promo.agotada %} disabled{% endif %}>
+            <strong>{{ promo.nombre }}</strong>
+            <span class="obs">{% for i in promo.items.all %}{{ i.cantidad }}× {{ i.producto.nombre }}{% if not forloop.last %} · {% endif %}{% endfor %}</span>
+            <span class="precio"><span><b>${{ promo.precio_usd }}</b>{% if promo.precio_bs %} · Bs {{ promo.precio_bs|intcomma }}{% endif %}</span>{% if promo.agotada %}<span class="stock-cero">Sin stock</span>{% endif %}</span>
+          </button>
+        {% endfor %}
+      </form>
+    {% endif %}
     <form method="post" action="{% url 'mesas:agregar' pedido.pk %}">
       {% csrf_token %}
       <input type="hidden" name="cantidad" value="1">
@@ -137,7 +202,7 @@
     <div class="stack" style="justify-content: space-between">
       <a class="ghost" href="{% url 'mesas:mapa' %}">← Volver al mapa</a>
       {% if not facturado %}
-        <form method="post" action="{% url 'mesas:anular' pedido.pk %}" onsubmit="return confirm('¿Anular este pedido{% if pedido.mesa %} y liberar la mesa{% endif %}?');">
+        <form method="post" action="{% url 'mesas:anular' pedido.pk %}" data-confirmar="¿Anular este pedido{% if pedido.mesa %} y liberar la mesa{% endif %}?" data-confirmar-peligro>
           {% csrf_token %}
           <button class="ghost" type="submit" style="color: var(--rojo-tinta)">Anular pedido</button>
         </form>

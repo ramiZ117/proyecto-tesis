@@ -21,6 +21,7 @@ from inventario.servicios import (
     registrar_merma,
     valor_merma_del_mes,
 )
+from inventario.servicios import auditar_inventario, kardex as calcular_kardex
 
 ORDEN_NIVEL = {"critico": 0, "reponer": 1, "ok": 2}
 
@@ -112,7 +113,12 @@ def movimiento(request):
             messages.success(request, f"Conteo guardado: {insumo.nombre} queda en {num(cantidad)} {insumo.abreviatura}.")
         else:
             costo = _leer_cantidad(request.POST.get("costo"))
-            registrar_entrada(insumo.pk, cantidad, nota, request.user, costo if costo is not None and costo > 0 else None)
+            documento = " ".join((request.POST.get("documento") or "").split())
+            if len(documento) > 60:
+                messages.error(request, "El número de documento es demasiado largo (máximo 60 caracteres).")
+                return _volver(tipo, insumo_id)
+            registrar_entrada(insumo.pk, cantidad, nota, request.user, costo if costo is not None and costo > 0 else None,
+                              documento=documento)
             messages.success(request, f"Entrada registrada: +{num(cantidad)} {insumo.abreviatura} de {insumo.nombre}.")
     except ValidationError as exc:
         messages.error(request, texto_validacion(exc))
@@ -149,3 +155,172 @@ def compra_csv(request):
         i = fila["insumo"]
         escritor.writerow([fila["proveedor"], i.nombre, f"{fila['cantidad'].normalize():f}", i.abreviatura, fila["costo_usd"]])
     return respuesta
+
+
+
+# ---- movimientos de inventario (auditoría) y kárdex ---------------------------------------------
+POR_PAGINA = 50
+MAX_DIAS_CONSULTA = 366
+
+
+def _rango_fechas(request, por_defecto_dias: int = 30):
+    """Lee ?desde=&hasta= (AAAA-MM-DD). Devuelve (desde, hasta, inicio_dt, fin_dt, error)."""
+    from datetime import datetime, time, timedelta
+
+    from django.utils.dateparse import parse_date
+
+    hoy = timezone.localdate()
+    texto_desde, texto_hasta = request.GET.get("desde", ""), request.GET.get("hasta", "")
+    def leer(texto, defecto):
+        if not texto:
+            return defecto
+        try:
+            return parse_date(texto)
+        except ValueError:  # bien escrita pero imposible, p. ej. mes 13
+            return None
+
+    desde = leer(texto_desde, hoy - timedelta(days=por_defecto_dias - 1))
+    hasta = leer(texto_hasta, hoy)
+    error = ""
+    if desde is None or hasta is None:
+        error = "Fecha no válida: usa el calendario."
+        desde, hasta = hoy - timedelta(days=por_defecto_dias - 1), hoy
+    elif desde > hasta:
+        error = "La fecha «desde» no puede ser posterior a «hasta»."
+        desde, hasta = hasta, desde
+    elif (hasta - desde).days > MAX_DIAS_CONSULTA:
+        error = f"Consulta como máximo {MAX_DIAS_CONSULTA} días; se acotó el rango."
+        desde = hasta - timedelta(days=MAX_DIAS_CONSULTA)
+    if hasta > hoy:
+        hasta = hoy
+    inicio = timezone.make_aware(datetime.combine(desde, time.min))
+    fin = timezone.make_aware(datetime.combine(hasta + timedelta(days=1), time.min))
+    return desde, hasta, inicio, fin, error
+
+
+def _filtrar_movimientos(request):
+    from django.contrib.auth.models import User
+    from django.db.models import Q
+
+    desde, hasta, inicio, fin, error = _rango_fechas(request)
+    filtros = {"desde": desde, "hasta": hasta, "insumo": "", "tipo": "", "motivo": "", "usuario": "", "q": ""}
+    consulta = (MovimientoStock.objects.filter(creado_en__gte=inicio, creado_en__lt=fin)
+                .select_related("insumo", "usuario", "detalle_pedido__producto"))
+    insumo = request.GET.get("insumo", "")
+    if insumo.isdigit():
+        consulta = consulta.filter(insumo_id=int(insumo))
+        filtros["insumo"] = int(insumo)
+    tipo = request.GET.get("tipo", "")
+    if tipo in MovimientoStock.Tipo.values:
+        consulta = consulta.filter(tipo=tipo)
+        filtros["tipo"] = tipo
+    motivo = request.GET.get("motivo", "")
+    if motivo in MovimientoStock.Motivo.values:
+        consulta = consulta.filter(motivo=motivo)
+        filtros["motivo"] = motivo
+    usuario = request.GET.get("usuario", "")
+    if usuario == "sistema":
+        consulta = consulta.filter(usuario__isnull=True)
+        filtros["usuario"] = usuario
+    elif usuario.isdigit():
+        consulta = consulta.filter(usuario_id=int(usuario))
+        filtros["usuario"] = int(usuario)
+    q = " ".join((request.GET.get("q") or "").split())[:60]
+    if q:
+        consulta = consulta.filter(Q(nota__icontains=q) | Q(documento__icontains=q) | Q(insumo__nombre__icontains=q))
+        filtros["q"] = q
+    usuarios = User.objects.filter(movimientos_stock__isnull=False).distinct().order_by("username")
+    return consulta, filtros, error, usuarios
+
+
+@requiere_grupo(GRUPO_CAJA)
+def movimientos(request):
+    """Registro completo de lo que entra y sale del inventario, con filtros, totales y exportación."""
+    from django.core.paginator import Paginator
+    from django.db.models import Count, DecimalField, ExpressionWrapper, F, Sum
+
+    consulta, filtros, error, usuarios = _filtrar_movimientos(request)
+    if error:
+        messages.warning(request, error)
+    if request.GET.get("formato") == "csv":
+        return _movimientos_csv(consulta.order_by("creado_en", "id"), filtros)
+    valor = ExpressionWrapper(F("cantidad") * F("costo_unitario"), output_field=DecimalField(max_digits=18, decimal_places=4))
+    resumen = {fila["tipo"]: fila for fila in consulta.values("tipo").annotate(n=Count("id"), valor=Sum(valor))}
+    tarjetas = [
+        {"tipo": clave, "etiqueta": etiqueta, "n": resumen.get(clave, {}).get("n", 0),
+         "valor": (resumen.get(clave, {}).get("valor") or Decimal("0")).quantize(Decimal("0.01"))}
+        for clave, etiqueta in MovimientoStock.Tipo.choices
+    ]
+    pagina = Paginator(consulta.order_by("-creado_en", "-id"), POR_PAGINA).get_page(request.GET.get("pagina"))
+    parametros = request.GET.copy()
+    parametros.pop("pagina", None)
+    return render(request, "inventario/movimientos.html", {
+        "pagina": pagina, "filtros": filtros, "tarjetas": tarjetas, "total": pagina.paginator.count,
+        "insumos": Insumo.objects.order_by("nombre"), "usuarios": usuarios,
+        "tipos": MovimientoStock.Tipo.choices, "motivos": MovimientoStock.Motivo.choices,
+        "parametros": parametros.urlencode(), "auditoria": auditar_inventario(),
+    })
+
+
+def _movimientos_csv(consulta, filtros):
+    respuesta = HttpResponse(content_type="text/csv; charset=utf-8")
+    respuesta["Content-Disposition"] = f'attachment; filename="movimientos_{filtros["desde"]:%Y%m%d}_{filtros["hasta"]:%Y%m%d}.csv"'
+    respuesta.write("\ufeff")  # Excel reconoce los acentos
+    escritor = csv.writer(respuesta, delimiter=";")
+    escritor.writerow(["Fecha", "Hora", "Insumo", "Unidad", "Tipo", "Motivo", "Variación", "Existencia anterior",
+                       "Existencia resultante", "Costo unitario USD", "Valor USD", "Documento", "Usuario", "Nota"])
+    for m in consulta.iterator():
+        local = timezone.localtime(m.creado_en)
+        escritor.writerow([
+            local.strftime("%d/%m/%Y"), local.strftime("%H:%M"), _celda(m.insumo.nombre), m.insumo.abreviatura,
+            m.get_tipo_display(), m.get_motivo_display() if m.motivo else "", num(m.variacion),
+            num(m.stock_anterior) if m.stock_anterior is not None else "", num(m.stock_resultante),
+            num(m.costo_unitario, 4), num(m.valor_usd, 2), _celda(m.documento),
+            m.usuario.username if m.usuario else "Sistema", _celda(m.nota),
+        ])
+    return respuesta
+
+
+def _celda(texto: str) -> str:
+    """Evita que Excel ejecute fórmulas escritas en una nota (=, +, -, @)."""
+    texto = texto or ""
+    return "'" + texto if texto[:1] in ("=", "+", "-", "@") else texto
+
+
+@requiere_grupo(GRUPO_CAJA)
+def kardex(request, insumo_id):
+    """Kárdex del insumo: existencia inicial, cada entrada y salida con su saldo, y existencia final."""
+    from datetime import timedelta
+
+    from django.shortcuts import get_object_or_404
+
+    insumo = get_object_or_404(Insumo.objects.select_related("proveedor"), pk=insumo_id)
+    desde, hasta, inicio, fin, error = _rango_fechas(request, por_defecto_dias=30)
+    if error:
+        messages.warning(request, error)
+    datos = calcular_kardex(insumo, inicio, fin)
+    hoy = timezone.localdate()
+    cuadra = None
+    if hasta >= hoy:  # al día de hoy el saldo del kárdex debe ser el stock registrado
+        cuadra = datos["final"] == insumo.stock_actual
+    if request.GET.get("formato") == "csv":
+        respuesta = HttpResponse(content_type="text/csv; charset=utf-8")
+        respuesta["Content-Disposition"] = f'attachment; filename="kardex_{insumo.pk}_{desde:%Y%m%d}_{hasta:%Y%m%d}.csv"'
+        respuesta.write("\ufeff")
+        escritor = csv.writer(respuesta, delimiter=";")
+        escritor.writerow([f"Kárdex de {insumo.nombre} ({insumo.abreviatura})", f"{desde:%d/%m/%Y} al {hasta:%d/%m/%Y}"])
+        escritor.writerow(["Fecha", "Tipo", "Documento", "Detalle", "Entrada", "Salida", "Saldo", "Costo unitario USD", "Usuario"])
+        escritor.writerow([f"{desde:%d/%m/%Y}", "Existencia inicial", "", "", "", "", num(datos["inicial"]), "", ""])
+        for f in datos["filas"]:
+            m = f["mov"]
+            escritor.writerow([timezone.localtime(m.creado_en).strftime("%d/%m/%Y %H:%M"), m.get_tipo_display(), _celda(m.documento),
+                               _celda(m.nota), num(f["entrada"]) if f["entrada"] else "", num(f["salida"]) if f["salida"] else "",
+                               num(f["saldo"]), num(m.costo_unitario, 4), m.usuario.username if m.usuario else "Sistema"])
+        escritor.writerow(["", "Totales", "", "", num(datos["entradas"]), num(datos["salidas"]), num(datos["final"]), "", ""])
+        return respuesta
+    return render(request, "inventario/kardex.html", {
+        "insumo": insumo, "desde": desde, "hasta": hasta, "k": datos, "cuadra": cuadra,
+        "insumos": Insumo.objects.order_by("nombre"),
+        "atajos": {"7 días": (hoy - timedelta(days=6), hoy), "30 días": (hoy - timedelta(days=29), hoy),
+                   "Este mes": (hoy.replace(day=1), hoy)},
+    })

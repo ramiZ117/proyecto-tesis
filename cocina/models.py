@@ -38,6 +38,8 @@ class PedidoKDSManager(models.Manager):
             activos = [i.enviado_en for i in pedido.items_cocina if i.estado in {Det.PENDIENTE, Det.EN_PREPARACION} and i.enviado_en]
             fechas = activos or [i.enviado_en for i in pedido.items_cocina if i.enviado_en]
             pedido.desde = min(fechas) if fechas else (pedido.enviado_cocina_en or pedido.creado_en)
+            pedido.por_empezar = sum(1 for i in pedido.items_cocina if i.estado == Det.PENDIENTE)
+            pedido.en_marcha = sum(1 for i in pedido.items_cocina if i.estado == Det.EN_PREPARACION)
             pedido.espera_min = max(int((ahora - pedido.desde).total_seconds() // 60), 0)
             pedido.pendiente_cocina = bool(activos)
             estados = {i.estado for i in pedido.items_cocina}

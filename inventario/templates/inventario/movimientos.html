@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Movimientos de inventario{% endblock %}
+{% block subtitle %}Registro de auditoría: cada entrada, salida por venta, merma y ajuste, con quién lo hizo y la existencia antes y después{% endblock %}
+{% block heading %}Movimientos de inventario{% endblock %}
+{% block top_actions %}
+  <a class="btn secundario" href="{% url 'inventario:stock' %}">← Inventario</a>
+  <a class="btn" href="?{{ parametros }}{% if parametros %}&amp;{% endif %}formato=csv">{% include "_icono.html" with nombre="descargar" %}Exportar CSV</a>
+{% endblock %}
+{% block content %}
+<section class="auditoria {% if auditoria %}con-diferencias{% else %}ok{% endif %} subir" aria-label="Auditoría">
+  {% if auditoria %}
+    <strong>{% include "_icono.html" with nombre="alerta" %}{{ auditoria|length }} insumo{{ auditoria|pluralize }} no cuadra{{ auditoria|pluralize:"n" }} con su historial</strong>
+    <ul>{% for p in auditoria %}<li><a href="{% url 'inventario:kardex' p.insumo.pk %}">{{ p.insumo.nombre }}</a>: {% if p.diferencia %}diferencia de {{ p.diferencia|floatformat:"-3" }} {{ p.insumo.abreviatura }}{% endif %}{% if p.saltos %}{% if p.diferencia %} · {% endif %}{{ p.saltos }} salto{{ p.saltos|pluralize }} en la cadena{% endif %}</li>{% endfor %}</ul>
+    <span class="obs">Revisa su kárdex y, si hace falta, registra un ajuste por conteo físico.</span>
+  {% else %}
+    <strong>{% include "_icono.html" with nombre="check" grosor="2.4" %}Auditoría al día: el historial de cada insumo explica su stock actual.</strong>
+    <span class="obs">Los movimientos no se pueden editar ni borrar; las correcciones se hacen con un ajuste por conteo.</span>
+  {% endif %}
+</section>
+
+<form class="card filtros-mov subir d1" method="get" aria-label="Filtros">
+  <div><label for="f-desde">Desde</label><input id="f-desde" type="date" name="desde" value="{{ filtros.desde|date:'Y-m-d' }}" max="{% now 'Y-m-d' %}"></div>
+  <div><label for="f-hasta">Hasta</label><input id="f-hasta" type="date" name="hasta" value="{{ filtros.hasta|date:'Y-m-d' }}" max="{% now 'Y-m-d' %}"></div>
+  <div><label for="f-insumo">Insumo</label>
+    <select id="f-insumo" name="insumo"><option value="">Todos</option>{% for i in insumos %}<option value="{{ i.pk }}"{% if filtros.insumo == i.pk %} selected{% endif %}>{{ i.nombre }}</option>{% endfor %}</select></div>
+  <div><label for="f-tipo">Tipo</label>
+    <select id="f-tipo" name="tipo"><option value="">Todos</option>{% for c, e in tipos %}<option value="{{ c }}"{% if filtros.tipo == c %} selected{% endif %}>{{ e }}</option>{% endfor %}</select></div>
+  <div><label for="f-motivo">Motivo</label>
+    <select id="f-motivo" name="motivo"><option value="">Todos</option>{% for c, e in motivos %}<option value="{{ c }}"{% if filtros.motivo == c %} selected{% endif %}>{{ e }}</option>{% endfor %}</select></div>
+  <div><label for="f-usuario">Usuario</label>
+    <select id="f-usuario" name="usuario"><option value="">Todos</option><option value="sistema"{% if filtros.usuario == "sistema" %} selected{% endif %}>Sistema (ventas)</option>{% for u in usuarios %}<option value="{{ u.pk }}"{% if filtros.usuario == u.pk %} selected{% endif %}>{{ u.username }}</option>{% endfor %}</select></div>
+  <div class="filtro-ancho"><label for="f-q">Buscar en nota o documento</label><input id="f-q" name="q" maxlength="60" value="{{ filtros.q }}" placeholder="Factura, proveedor, pedido…"></div>
+  <div class="filtro-botones"><button class="btn" type="submit">Filtrar</button><a class="btn secundario" href="{% url 'inventario:movimientos' %}">Limpiar</a></div>
+</form>
+
+<section class="grid-auto subir d2" style="--min: 190px; margin: 16px 0" aria-label="Resumen del período">
+  {% for t in tarjetas %}
+    <a class="kpi tarjeta-mov {{ t.tipo }}" href="?{{ parametros }}{% if parametros %}&amp;{% endif %}tipo={{ t.tipo }}">
+      <small>{{ t.etiqueta }}</small><strong>{{ t.n }}</strong><span>Valor ${{ t.valor|intcomma }}</span>
+    </a>
+  {% endfor %}
+</section>
+
+<section class="card subir d3">
+  <div class="card-cabecera" style="margin-bottom: 6px"><h2 style="margin:0">{{ total }} movimiento{{ total|pluralize }}</h2>
+    <span class="obs">{{ filtros.desde|date:"d/m/Y" }} – {{ filtros.hasta|date:"d/m/Y" }}</span></div>
+  <div class="tabla-caja">
+    <table class="tabla-mov">
+      <thead><tr><th>Fecha</th><th>Insumo</th><th>Tipo</th><th class="der">Cantidad</th><th class="der">Antes → después</th><th class="der">Valor</th><th>Documento / origen</th><th>Usuario</th></tr></thead>
+      <tbody>
+        {% for m in pagina %}
+          <tr>
+            <td class="num">{{ m.creado_en|date:"d/m/Y" }}<div class="obs">{{ m.creado_en|date:"H:i" }}</div></td>
+            <td><a href="{% url 'inventario:kardex' m.insumo_id %}" class="fuerte">{{ m.insumo.nombre }}</a></td>
+            <td><span class="pill mov-{{ m.tipo }}">{{ m.get_tipo_display }}</span>{% if m.motivo %}<div class="obs">{{ m.get_motivo_display }}</div>{% endif %}</td>
+            <td class="der num fuerte {% if m.es_ingreso %}sube{% else %}baja{% endif %}">{% if m.es_ingreso %}+{% else %}−{% endif %}{{ m.cantidad|floatformat:"-3" }} {{ m.insumo.abreviatura }}</td>
+            <td class="der num">{% if m.stock_anterior is not None %}{{ m.stock_anterior|floatformat:"-3" }}{% else %}—{% endif %} → <strong>{{ m.stock_resultante|floatformat:"-3" }}</strong></td>
+            <td class="der num">${{ m.valor_usd|intcomma }}</td>
+            <td>{{ m.documento|default:"—" }}{% if m.nota %}<div class="obs">{{ m.nota }}</div>{% endif %}</td>
+            <td>{{ m.usuario.username|default:"Sistema" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="8" class="obs">No hay movimientos con estos filtros.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if pagina.has_other_pages %}
+    <nav class="paginacion" aria-label="Páginas">
+      {% if pagina.has_previous %}<a class="btn sm secundario" href="?{{ parametros }}{% if parametros %}&amp;{% endif %}pagina={{ pagina.previous_page_number }}">← Anteriores</a>{% endif %}
+      <span class="obs">Página {{ pagina.number }} de {{ pagina.paginator.num_pages }}</span>
+      {% if pagina.has_next %}<a class="btn sm secundario" href="?{{ parametros }}{% if parametros %}&amp;{% endif %}pagina={{ pagina.next_page_number }}">Siguientes →</a>{% endif %}
+    </nav>
+  {% endif %}
+</section>
+{% endblock %}

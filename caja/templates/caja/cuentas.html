@@ -14,6 +14,8 @@
       <div class="stack" style="justify-content: space-between">
         <h2 style="margin:0">{% if c.pedido.mesa_id %}Mesa {{ c.pedido.mesa.numero }}{% else %}Llevar {{ c.pedido.codigo }}{% endif %}</h2>
         {% if c.factura %}<span class="pill info">Facturada</span>
+        {% elif c.cuenta_cliente.estado == "REP" %}<span class="pill ok">{{ c.cuenta_cliente.get_metodo_display }} reportado · por confirmar</span>
+        {% elif c.cuenta_cliente %}<span class="pill FAC">Pide la cuenta · {{ c.cuenta_cliente.get_metodo_display }}</span>
         {% elif c.solicitada %}<span class="pill FAC">{% if c.pedido.mesa_id %}Cuenta solicitada{% else %}Listo para cobrar{% endif %}</span>
         {% elif c.sin_enviar %}<span class="pill warn">Sin enviar</span>
         {% else %}<span class="pill ocu">En servicio</span>{% endif %}

@@ -12,7 +12,7 @@
     <p class="pill warn" style="white-space: normal; margin-top: 0">Tienes {{ facturas_abiertas }} factura{{ facturas_abiertas|pluralize }} abierta{{ facturas_abiertas|pluralize }} sin cobrar completa; no entra{{ facturas_abiertas|pluralize:"n" }} al cierre hasta cobrarse.</p>
   {% endif %}
   {% include "caja/_desglose.html" %}
-  <form method="post" action="{% url 'caja:generar_cierre' %}" class="no-print" style="margin-top: 18px" onsubmit="return confirm('¿Generar el cierre con estos totales?');">
+  <form method="post" action="{% url 'caja:generar_cierre' %}" class="no-print" style="margin-top: 18px" data-confirmar="¿Generar el cierre con estos totales?">
     {% csrf_token %}
     <button class="btn grande" type="submit">{% include "_icono.html" with nombre="cierre" %}Generar cierre</button>
   </form>

@@ -4,7 +4,7 @@
 - Correlativo de factura único, con reintento si dos emisiones chocan.
 - Un cierre por tramo de cada cajero (CierreCaja.secuencia).
 - El cierre guardado no cambia aunque después se anule una factura.
-- El panel de administración no edita registros transaccionales.
+- No existe el panel técnico de Django: facturas, pagos y cierres solo cambian por sus reglas.
 - SQLite en modo IMMEDIATE (las transacciones se atienden en fila).
 """
 
@@ -139,35 +139,14 @@ class CierrePorTramoTests(DatosBase):
         self.assertContains(r, "Devuelta")
 
 
-class AdminSoloLecturaTests(DatosBase):
-    @classmethod
-    def setUpTestData(cls):
-        super().setUpTestData()
-        cls.superusuario = User.objects.create_superuser("super", password=cls.PASSWORD)
+class SinPanelTecnicoTests(DatosBase):
+    """El panel técnico de Django ya no existe: todo se administra en las pantallas propias."""
 
-    def test_no_se_crean_ni_editan_ni_borran_facturas_desde_el_panel(self):
-        factura = Factura.emitir_desde_pedido(self.pedido(self.mesa1, items=[(self.agua, 1)]), self.cajero)
-        c = self.cliente(self.superusuario)
-        self.assertEqual(c.get("/admin/caja/factura/add/").status_code, 403)
-        self.assertEqual(c.get(f"/admin/caja/factura/{factura.pk}/delete/").status_code, 403)
-        r = c.post(f"/admin/caja/factura/{factura.pk}/change/", {"total_local": "1", "estado": "PAG"})
-        self.assertEqual(r.status_code, 403)
-        factura.refresh_from_db()
-        self.assertEqual(factura.estado, Factura.Estado.ABIERTA)
-        # Sí se puede consultar.
-        self.assertEqual(c.get(f"/admin/caja/factura/{factura.pk}/change/").status_code, 200)
-
-    def test_tablas_transaccionales_en_solo_lectura(self):
-        c = self.cliente(self.superusuario)
-        for ruta in ("caja/cierrecaja", "caja/tasacambio", "mesas/pedido",
-                     "inventario/movimientostock", "cocina/pedidokds"):
-            self.assertEqual(c.get(f"/admin/{ruta}/add/").status_code, 403, ruta)
-
-    def test_la_carta_y_los_insumos_siguen_editables(self):
-        c = self.cliente(self.superusuario)
-        for ruta in ("inventario/producto", "inventario/insumo", "inventario/categoria", "mesas/mesa"):
-            self.assertEqual(c.get(f"/admin/{ruta}/add/").status_code, 200, ruta)
+    def test_no_hay_panel_tecnico(self):
+        superusuario = User.objects.create_superuser("super", password=self.PASSWORD)
+        self.assertEqual(self.cliente(superusuario).get("/admin/").status_code, 404)
 
     def test_el_estado_de_la_mesa_no_se_edita_a_mano(self):
-        r = self.cliente(self.superusuario).get(f"/admin/mesas/mesa/{self.mesa1.pk}/change/")
+        r = self.cliente(self.admin).get(f"/gestion/mesas/{self.mesa1.pk}/")
+        self.assertEqual(r.status_code, 200)
         self.assertNotContains(r, 'name="estado"')

@@ -13,3 +13,5 @@ staticfiles/
 *.sqlite3-shm
 logs/
 respaldos/
+privado/
+tesis def.txt

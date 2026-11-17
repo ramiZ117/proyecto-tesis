@@ -1,11 +1,11 @@
-from django.contrib import admin
+from django.conf import settings
 from django.contrib.auth import views as auth_views
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.static import serve
 
 from config import views
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
     path("login/", views.LoginSeguro.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("", views.inicio, name="inicio"),
@@ -18,4 +18,9 @@ urlpatterns = [
     path("cocina/", include("cocina.urls")),
     path("caja/", include("caja.urls")),
     path("inventario/", include("inventario.urls")),
+    path("gestion/", include("gestion.urls")),
+    # Menú digital para clientes: público, sin iniciar sesión (enlace o QR).
+    path("menu/", include("menu.urls")),
+    # Fotos de los platos. Un solo local con pocos archivos: Django los sirve directamente.
+    re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
 ]

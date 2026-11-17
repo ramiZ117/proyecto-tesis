@@ -1,0 +1,79 @@
+{% load humanize %}
+<div class="tablero-linea">
+  <section class="columna-linea" aria-label="Pagos por verificar">
+    <h2>{% include "_icono.html" with nombre="alerta" %}Verificar pago <span class="pill warn">{{ verificar|length }}</span></h2>
+    {% for p in verificar %}
+      <article class="card pedido-linea verificar" data-por-verificar>
+        <div class="stack" style="justify-content: space-between"><strong>{{ p.codigo }} · {{ p.cliente_nombre }}</strong><span class="obs">hace {{ p.creado_en|timesince }}</span></div>
+        <div class="obs">{{ p.cliente_telefono }}{% if p.cliente_correo %} · {{ p.cliente_correo }}{% endif %}</div>
+        <ul class="lista-combo">{% for l in p.lineas %}<li>{{ l.cantidad }} × {{ l.nombre }}{% if l.nota %} <span class="obs">· {{ l.nota }}</span>{% endif %}</li>{% endfor %}</ul>
+        {% if p.nota %}<p class="obs" style="margin:0">Nota: {{ p.nota }}</p>{% endif %}
+        <dl class="datos-pago">
+          <div><dt>Método</dt><dd>{{ p.metodo_nombre }}</dd></div>
+          <div><dt>Monto</dt><dd class="num fuerte">{% if p.en_usd %}${{ p.monto|intcomma }}{% else %}Bs {{ p.monto|intcomma }}{% endif %}</dd></div>
+          <div><dt>Referencia</dt><dd class="num fuerte">{{ p.referencia }}</dd></div>
+          {% if p.datos_factura %}<div><dt>Factura a</dt><dd>{{ p.datos_factura.nombre }} · {{ p.datos_factura.documento }}</dd></div>{% endif %}
+        </dl>
+        <a class="btn sm secundario" href="{% url 'caja:comprobante' p.pk %}" target="_blank" rel="noopener">{% include "_icono.html" with nombre="foto" %}Ver comprobante</a>
+        <form method="post" action="{% url 'caja:en_linea_accion' p.pk %}">
+          {% csrf_token %}<input type="hidden" name="accion" value="aceptar">
+          <button class="btn bloque" type="submit">{% include "_icono.html" with nombre="check" grosor="2.4" %}Pago verificado: enviar a cocina</button>
+        </form>
+        <details class="desplegable">
+          <summary>Rechazar</summary>
+          <form method="post" action="{% url 'caja:en_linea_accion' p.pk %}" class="stack">
+            {% csrf_token %}<input type="hidden" name="accion" value="rechazar">
+            <label class="oculto" for="motivo-{{ p.pk }}">Motivo</label>
+            <input id="motivo-{{ p.pk }}" name="motivo" maxlength="200" required placeholder="Ej.: el pago no llegó" style="flex: 1 1 160px">
+            <button class="btn sm peligro" type="submit">Rechazar</button>
+          </form>
+        </details>
+      </article>
+    {% empty %}<p class="vacio">No hay pagos por verificar.</p>{% endfor %}
+  </section>
+
+  <section class="columna-linea" aria-label="En cocina">
+    <h2>{% include "_icono.html" with nombre="cocina" %}En cocina <span class="pill info">{{ cocina|length }}</span></h2>
+    {% for p in cocina %}
+      <article class="card pedido-linea">
+        <div class="stack" style="justify-content: space-between"><strong>{{ p.codigo }} · {{ p.cliente_nombre }}</strong><span class="pill prep">{{ p.pedido.get_estado_display }}</span></div>
+        <ul class="lista-combo">{% for l in p.lineas %}<li>{{ l.cantidad }} × {{ l.nombre }}</li>{% endfor %}</ul>
+        <span class="obs">Pagado · verificó {{ p.revisado_por.username }} {{ p.revisado_en|date:"H:i" }}</span>
+      </article>
+    {% empty %}<p class="vacio">Nada en cocina.</p>{% endfor %}
+  </section>
+
+  <section class="columna-linea" aria-label="Listos para retirar">
+    <h2>{% include "_icono.html" with nombre="llevar" %}Listos: avisar al cliente <span class="pill ok">{{ listo|length }}</span></h2>
+    {% for p in listo %}
+      <article class="card pedido-linea listo" data-listo-retirar>
+        <div class="stack" style="justify-content: space-between"><strong>{{ p.codigo }} · {{ p.cliente_nombre }}</strong>{% if p.avisado_en %}<span class="pill ok">Avisado {{ p.avisado_en|date:"H:i" }}</span>{% else %}<span class="pill warn">Sin avisar</span>{% endif %}</div>
+        <div class="obs">Teléfono: <strong>{{ p.cliente_telefono }}</strong></div>
+        <div class="stack">
+          <a class="btn sm" href="{{ p.whatsapp }}" target="_blank" rel="noopener">Avisar por WhatsApp</a>
+          <a class="btn sm secundario" href="tel:{{ p.cliente_telefono }}">Llamar</a>
+          {% if not p.avisado_en %}
+            <form method="post" action="{% url 'caja:en_linea_accion' p.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="avisado"><button class="btn sm secundario" type="submit">Ya le avisé</button></form>
+          {% endif %}
+        </div>
+        <form method="post" action="{% url 'caja:en_linea_accion' p.pk %}">
+          {% csrf_token %}<input type="hidden" name="accion" value="entregar">
+          <button class="btn bloque azul" type="submit">Entregado al cliente</button>
+        </form>
+      </article>
+    {% empty %}<p class="vacio">Ningún pedido listo por ahora.</p>{% endfor %}
+  </section>
+</div>
+{% if recientes %}
+  <section class="card" style="margin-top: 16px">
+    <h2>Recientes</h2>
+    <div class="tabla-caja"><table>
+      <thead><tr><th>Pedido</th><th>Cliente</th><th>Estado</th><th>Detalle</th></tr></thead>
+      <tbody>{% for p in recientes %}
+        <tr><td>{{ p.codigo }}</td><td>{{ p.cliente_nombre }} · {{ p.cliente_telefono }}</td>
+            <td>{% if p.estado == "ENT" %}<span class="pill gris">Entregado {{ p.entregado_en|date:"d/m H:i" }}</span>{% else %}<span class="pill crit">Rechazado</span>{% endif %}</td>
+            <td class="obs">{% if p.estado == "REC" %}{{ p.motivo_rechazo }}{% elif p.pedido %}{{ p.pedido.codigo }}{% endif %}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </section>
+{% endif %}

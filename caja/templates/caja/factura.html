@@ -21,8 +21,20 @@
   </aside>
 
   <section class="caja-factura card subir d1" aria-label="Detalle de la factura">
+    <div class="encabezado-fiscal solo-print">
+      <strong>{{ local_nombre }}</strong>{% if local_rif %} · RIF {{ local_rif }}{% endif %}<br>{{ local_direccion }}<br>
+      Factura {{ factura.numero }} · {{ factura.emitida_en|date:"d/m/Y H:i" }}
+    </div>
+    <div class="datos-factura-cliente">
+      {% if factura.personalizada %}
+        <strong>{{ factura.cliente_nombre }}</strong> · {{ factura.cliente_documento }}<br>
+        <span class="obs">{{ factura.cliente_direccion }}{% if factura.cliente_telefono %} · {{ factura.cliente_telefono }}{% endif %}{% if factura.cliente_correo %} · {{ factura.cliente_correo }}{% endif %}</span>
+      {% else %}
+        <strong>Consumidor final</strong>{% if factura.cliente_correo %} <span class="obs">· {{ factura.cliente_correo }}</span>{% endif %}
+      {% endif %}
+    </div>
     <div class="stack" style="justify-content: space-between">
-      <div class="obs">Emitida por {{ factura.cajero.username }} · {{ factura.emitida_en|date:"d/m/Y H:i" }}</div>
+      <div class="obs">Atendió <strong>{{ factura.pedido.mesero.username }}</strong> · emitida por {{ factura.cajero.username }} · {{ factura.emitida_en|date:"d/m/Y H:i" }}</div>
       <span class="pill {% if factura.estado == 'PAG' %}ok{% elif factura.estado == 'ANU' %}crit{% else %}info{% endif %}">{{ factura.get_estado_display }}</span>
     </div>
     {% if factura.estado == "ANU" %}
@@ -43,13 +55,21 @@
       </table>
     </div>
     <div class="separador">
-      <div class="stack obs" style="justify-content: space-between"><span>Total</span><span>Bs {{ factura.total_local|intcomma }} · ${{ factura.total_usd|intcomma }}</span></div>
+      {% if factura.descuento_local %}
+        <div class="stack obs" style="justify-content: space-between"><span>Subtotal</span><span>Bs {{ factura.subtotal_local|intcomma }}</span></div>
+        <div class="linea-pago" style="color: var(--naranja-tinta)"><span>Descuento · {{ factura.descuento_motivo }}{% if factura.descuento_por %} ({{ factura.descuento_por.username }}){% endif %}</span><span class="num">− Bs {{ factura.descuento_local|intcomma }}</span></div>
+      {% endif %}
+      <div class="stack obs" style="justify-content: space-between"><span>Base imponible</span><span>Bs {{ factura.base_imponible_local|intcomma }}</span></div>
+      <div class="stack obs" style="justify-content: space-between"><span>IVA ({{ factura.iva_porcentaje|floatformat:0 }} %)</span><span>Bs {{ factura.iva_local|intcomma }}</span></div>
+      <div class="stack fuerte" style="justify-content: space-between"><span>Total</span><span>Bs {{ factura.total_local|intcomma }} · ${{ factura.total_usd|intcomma }}</span></div>
       {% for p in factura.pagos.all %}
         <div class="linea-pago">
           <span>{{ p.get_metodo_display }}{% if p.moneda == "USD" %} · ${{ p.monto_recibido|intcomma }}{% endif %}{% if p.referencia %} · ref. {{ p.referencia }}{% endif %}{% if p.pagador %} · {{ p.pagador }}{% endif %}{% if p.vuelto_local > 0 %} · vuelto Bs {{ p.vuelto_local|intcomma }}{% endif %}</span>
           <span class="num">− Bs {{ p.monto_local|intcomma }}</span>
         </div>
+        {% if p.igtf_local %}<div class="linea-pago obs"><span>IGTF ({{ igtf_porcentaje|floatformat:0 }} %) sobre el pago en divisas</span><span class="num">+ Bs {{ p.igtf_local|intcomma }}</span></div>{% endif %}
       {% endfor %}
+      {% if factura.igtf_local %}<div class="stack obs" style="justify-content: space-between"><span>Total pagado con IGTF</span><span>Bs {{ factura.total_con_igtf_local|intcomma }}</span></div>{% endif %}
       <div class="saldo"><span class="fuerte">Saldo</span><span><strong>Bs {{ saldo|intcomma }}</strong> <span class="muted">· ${{ saldo_usd|intcomma }}</span></span></div>
     </div>
     <p class="stack no-print" style="margin: 16px 0 0">
@@ -79,7 +99,39 @@
 
   <section class="caja-cobro subir d2" aria-label="Cobro">
     {% if factura.estado == "ABI" %}
-      <form class="card pila" method="post" action="{% url 'caja:pago' factura.pk %}" id="pago" data-cobro data-saldo="{{ saldo|unlocalize }}" data-tasa="{{ factura.tasa_cambio|unlocalize }}">
+      {% if cuenta_cliente %}
+        <section class="card pila pago-cliente {{ cuenta_cliente.estado }}" style="gap: 10px">
+          {% if cuenta_cliente.estado == "REP" %}
+            <h2 style="margin:0">El cliente reportó un pago</h2>
+            <dl class="datos-pago">
+              <div><dt>Método</dt><dd>{{ cuenta_cliente.get_metodo_display }}</dd></div>
+              <div><dt>Referencia</dt><dd class="num fuerte">{{ cuenta_cliente.referencia }}</dd></div>
+              <div><dt>Monto de la cuenta</dt><dd class="num">{% if cuenta_cliente.en_usd %}${{ cuenta_cliente.monto|intcomma }}{% else %}Bs {{ cuenta_cliente.monto|intcomma }}{% endif %}</dd></div>
+              {% if cuenta_cliente.propina %}<div><dt>Propina</dt><dd class="num">{% if cuenta_cliente.en_usd %}${{ cuenta_cliente.propina|intcomma }}{% else %}Bs {{ cuenta_cliente.propina|intcomma }}{% endif %}</dd></div>{% endif %}
+              <div><dt>Total transferido</dt><dd class="num fuerte">{% if cuenta_cliente.en_usd %}${{ cuenta_cliente.total_a_pagar|intcomma }}{% else %}Bs {{ cuenta_cliente.total_a_pagar|intcomma }}{% endif %}</dd></div>
+              {% if cuenta_cliente.origen %}<div><dt>Desde</dt><dd>{{ cuenta_cliente.origen }}</dd></div>{% endif %}
+            </dl>
+            <p class="obs" style="margin:0">Verifica en el banco o la app que llegó y confírmalo: se registra el pago{% if cuenta_cliente.propina %} y la propina{% endif %} sin escribir nada.</p>
+            <div class="stack">
+              <form method="post" action="{% url 'caja:pago_cliente' factura.pk %}" style="flex: 2 1 180px; display: flex">
+                {% csrf_token %}<input type="hidden" name="accion" value="confirmar">
+                <button class="btn bloque" type="submit">{% include "_icono.html" with nombre="check" grosor="2.4" %}Confirmar, llegó</button>
+              </form>
+              <form method="post" action="{% url 'caja:pago_cliente' factura.pk %}" style="flex: 1 1 120px; display: flex" data-confirmar="¿Marcar que el pago NO llegó? El cliente verá el aviso.">
+                {% csrf_token %}<input type="hidden" name="accion" value="rechazar">
+                <button class="btn secundario bloque" type="submit">No llegó</button>
+              </form>
+            </div>
+          {% elif cuenta_cliente.estado == "REC" %}
+            <h2 style="margin:0">Pago del cliente no encontrado</h2>
+            <p class="obs" style="margin:0">Se avisó a la mesa. Puede volver a reportarlo o pagar aquí.</p>
+          {% else %}
+            <h2 style="margin:0">La mesa pidió la cuenta</h2>
+            <p class="obs" style="margin:0">Va a pagar con <strong>{{ cuenta_cliente.get_metodo_display }}</strong>{% if cuenta_cliente.es_digital %} desde su teléfono: espera a que reporte la referencia{% else %} en caja{% endif %}.</p>
+          {% endif %}
+        </section>
+      {% endif %}
+      <form class="card pila" method="post" action="{% url 'caja:pago' factura.pk %}" id="pago" data-cobro data-saldo="{{ saldo|unlocalize }}" data-tasa="{{ factura.tasa_cambio|unlocalize }}" data-igtf="{{ igtf_porcentaje|unlocalize }}" data-igtf-metodos="{{ igtf_metodos }}">
         {% csrf_token %}
         <h2 style="margin:0">Registrar pago</h2>
         <p class="obs" style="margin:0">Cobra el total de la mesa. Si cada quien paga lo suyo, abre «Dividir la cuenta».</p>
@@ -102,7 +154,7 @@
           </div>
         </div>
         <div class="stack">
-          <button class="btn sm secundario" type="button" data-rapido data-exacto data-bs="{{ saldo|unlocalize }}" data-usd="{{ saldo_usd|unlocalize }}">Exacto</button>
+          <button class="btn sm secundario" type="button" data-rapido data-exacto data-bs="{{ saldo|unlocalize }}" data-usd="{{ saldo_usd|unlocalize }}" data-usd-igtf="{{ saldo_usd_igtf|unlocalize }}">Exacto</button>
           <button class="btn sm secundario" type="button" data-rapido data-usd="20" hidden>$20</button>
           <button class="btn sm secundario" type="button" data-rapido data-usd="50" hidden>$50</button>
           <button class="btn sm secundario" type="button" data-rapido data-usd="100" hidden>$100</button>
@@ -111,6 +163,33 @@
           <label for="referencia">Referencia / voucher <span class="obs">(obligatorio en pago móvil y tarjeta)</span></label>
           <input id="referencia" name="referencia" maxlength="60" placeholder="Últimos dígitos">
         </div>
+
+        {# Pago mixto: filas adicionales (se activan con el botón; sin JavaScript no se envían) #}
+        <div class="pagos-extra" data-pagos-extra>
+          {% for n in "123" %}
+            <div class="fila-pago" data-fila-pago hidden>
+              <select name="metodo" aria-label="Método del pago adicional" disabled>
+                {% for clave, nombre, ayuda in metodos %}<option value="{{ clave }}">{{ nombre }}</option>{% endfor %}
+              </select>
+              <input name="monto_recibido" type="text" inputmode="decimal" placeholder="Monto" aria-label="Monto del pago adicional" disabled>
+              <input name="referencia" maxlength="60" placeholder="Referencia" aria-label="Referencia del pago adicional" disabled>
+              <button class="ghost" type="button" data-quitar-fila aria-label="Quitar este pago">✕</button>
+            </div>
+          {% endfor %}
+        </div>
+        <button class="btn sm secundario" type="button" data-agregar-pago>{% include "_icono.html" with nombre="mas" grosor="2.4" %}Agregar otro método (pago mixto)</button>
+        <p class="hint" style="margin: -6px 0 0">Divisa, Binance y Zinli van en USD; el resto en bolívares. La divisa en efectivo paga además el IGTF ({{ igtf_porcentaje|floatformat:0 }} %). El vuelto sale del pago en efectivo.</p>
+
+        <details class="desplegable" data-propina>
+          <summary>Propina para {{ factura.pedido.mesero.username }}</summary>
+          <div class="stack" style="padding-top: 6px">
+            <select name="propina_metodo" aria-label="Cómo dejó la propina" style="flex: 1 1 150px">
+              {% for clave, nombre, ayuda in metodos %}<option value="{{ clave }}">{{ nombre }}</option>{% endfor %}
+            </select>
+            <input name="propina_monto" type="text" inputmode="decimal" placeholder="Monto (en $ si es divisa)" aria-label="Monto de la propina" style="flex: 1 1 150px">
+          </div>
+          <p class="hint" style="margin: 6px 0 0">Queda como saldo a favor del mesero hasta que se le pague.</p>
+        </details>
         {% if mostrar_division %}
           <div>
             <label for="pagador">Pagador</label>
@@ -120,11 +199,34 @@
         {% endif %}
         <div class="calculo" aria-live="polite">
           <div><span>Se aplica a la cuenta</span><strong data-aplicado>—</strong></div>
+          <div data-fila-igtf hidden><span>IGTF ({{ igtf_porcentaje|floatformat:0 }} %) por pago en divisas</span><strong data-igtf-monto>—</strong></div>
           <div><span>Vuelto en Bs</span><strong data-vuelto>—</strong></div>
           <span class="aviso" data-aviso hidden>Con este método no se entrega vuelto: el monto supera el saldo.</span>
         </div>
         <button class="btn grande bloque" type="submit" data-cobrar>Cobrar</button>
       </form>
+
+      {% if not factura.pagos.exists %}
+        <form class="card pila" method="post" action="{% url 'caja:descuento' factura.pk %}" style="gap: 10px">
+          {% csrf_token %}
+          <h2 style="margin:0">Descuento</h2>
+          {% if factura.descuento_local %}
+            <p class="obs" style="margin:0">Aplicado: Bs {{ factura.descuento_local|intcomma }} · {{ factura.descuento_motivo }}</p>
+            <button class="btn sm secundario" type="submit" name="quitar" value="1" style="align-self: flex-start">Quitar descuento</button>
+          {% else %}
+            <div class="stack">
+              <select name="tipo" aria-label="Tipo de descuento" style="flex: 1 1 130px">
+                <option value="porcentaje">Porcentaje (%)</option>
+                <option value="usd">Monto en $</option>
+                <option value="bs">Monto en Bs</option>
+              </select>
+              <input name="valor" type="text" inputmode="decimal" placeholder="Valor" required aria-label="Valor del descuento" style="flex: 1 1 100px">
+            </div>
+            <input name="motivo" maxlength="200" required placeholder="Motivo: cortesía, cliente frecuente, error…" aria-label="Motivo del descuento">
+            <button class="btn sm secundario" type="submit" style="align-self: flex-start">Aplicar descuento</button>
+          {% endif %}
+        </form>
+      {% endif %}
 
       <details id="division" class="opcional"{% if mostrar_division %} open{% endif %}>
         <summary>Dividir la cuenta (opcional)</summary>
@@ -192,7 +294,7 @@
               </div>
             {% endfor %}
           </div>
-          <form method="post" action="{% url 'caja:quitar_asignacion' factura.pk %}" onsubmit="return confirm('¿Quitar todas las asignaciones?');" style="margin-top: 10px">
+          <form method="post" action="{% url 'caja:quitar_asignacion' factura.pk %}" data-confirmar="¿Quitar todas las asignaciones?" style="margin-top: 10px">
             {% csrf_token %}<button class="ghost" type="submit">Quitar todas las asignaciones</button>
           </form>
         {% endif %}
@@ -200,14 +302,14 @@
 
       <div class="card">
         {% if not factura.pagos.exists %}
-          <form method="post" action="{% url 'caja:anular_factura' factura.pk %}" onsubmit="return confirm('¿Anular esta factura?');">
+          <form method="post" action="{% url 'caja:anular_factura' factura.pk %}" data-confirmar="¿Anular esta factura?" data-confirmar-peligro>
             {% csrf_token %}
             <label for="motivo" style="margin-top:0">Anular factura (motivo)</label>
             <input id="motivo" name="motivo" maxlength="200" required>
             <p style="margin: 10px 0 0"><button class="btn peligro" type="submit">Anular factura</button></p>
           </form>
         {% elif es_admin %}
-          <form method="post" action="{% url 'caja:anular_factura' factura.pk %}" onsubmit="return confirm('Se anulará la factura y se devolverán todos los pagos. ¿Continuar?');">
+          <form method="post" action="{% url 'caja:anular_factura' factura.pk %}" data-confirmar="Se anulará la factura y se devolverán todos los pagos. ¿Continuar?" data-confirmar-peligro>
             {% csrf_token %}
             <label for="motivo" style="margin-top:0">Anular y devolver los pagos (motivo)</label>
             <input id="motivo" name="motivo" maxlength="200" required>
@@ -228,8 +330,22 @@
           <a class="btn oscuro" href="{% url 'caja:cuentas' %}">Siguiente cuenta</a>
         </div>
       </div>
+      <form class="card pila no-print" method="post" action="{% url 'caja:propina' factura.pk %}" style="gap: 10px">
+        {% csrf_token %}
+        <h2 style="margin:0">Propina para {{ factura.pedido.mesero.username }}</h2>
+        {% for p in propinas %}
+          <div class="linea-pago"><span>{{ p.get_metodo_display }}{% if p.pagada %} · entregada{% endif %}</span><span class="num">{% if p.moneda == "USD" %}${{ p.monto|intcomma }}{% else %}Bs {{ p.monto|intcomma }}{% endif %}</span></div>
+        {% endfor %}
+        <div class="stack">
+          <select name="propina_metodo" aria-label="Cómo dejó la propina" style="flex: 1 1 140px">
+            {% for clave, nombre, ayuda in metodos %}<option value="{{ clave }}">{{ nombre }}</option>{% endfor %}
+          </select>
+          <input name="propina_monto" type="text" inputmode="decimal" required placeholder="Monto" aria-label="Monto de la propina" style="flex: 1 1 110px">
+          <button class="btn sm" type="submit">Registrar</button>
+        </div>
+      </form>
       {% if es_admin %}
-        <form class="card no-print" method="post" action="{% url 'caja:anular_factura' factura.pk %}" onsubmit="return confirm('Se anulará la venta y se devolverán todos los pagos. ¿Continuar?');">
+        <form class="card no-print" method="post" action="{% url 'caja:anular_factura' factura.pk %}" data-confirmar="Se anulará la venta y se devolverán todos los pagos. ¿Continuar?" data-confirmar-peligro>
           {% csrf_token %}
           <h2>Devolución</h2>
           <label for="motivo" style="margin-top:0">Anular esta venta y devolver el dinero (motivo)</label>
@@ -240,6 +356,40 @@
       {% endif %}
     {% else %}
       <div class="card"><p class="obs" style="margin:0">Factura anulada. {% if factura.pedido.estado != "CER" and factura.pedido.estado != "ANU" %}La comanda puede modificarse y facturarse de nuevo desde <a href="{% url 'caja:cuentas' %}">Cuentas</a>.{% endif %}</p></div>
+    {% endif %}
+    {% if factura.estado != "ANU" %}
+      <details class="card no-print" id="datos-cliente"{% if factura.personalizada %} open{% endif %} style="margin-top: 16px">
+        <summary class="fuerte">Datos de la factura · {% if factura.personalizada %}{{ factura.cliente_nombre }}{% else %}consumidor final{% endif %}</summary>
+        <form method="post" action="{% url 'caja:datos_cliente' factura.pk %}" class="pila" style="gap: 6px; margin-top: 10px" data-sin-parcial>
+          {% csrf_token %}
+          <p class="obs" style="margin:0">Si el cliente pide factura con sus datos, complétalos. Si no, queda como consumidor final.</p>
+          <label for="cli-nombre">Nombre o razón social</label>
+          <input id="cli-nombre" name="nombre" maxlength="120" value="{{ factura.cliente_nombre }}" required>
+          <label for="cli-doc">Cédula o RIF</label>
+          <input id="cli-doc" name="documento" maxlength="20" placeholder="V-12345678 o J-123456789" value="{{ factura.cliente_documento }}" required>
+          <label for="cli-dir">Dirección fiscal</label>
+          <input id="cli-dir" name="direccion" maxlength="200" value="{{ factura.cliente_direccion }}" required>
+          <div class="grid-auto" style="--min: 160px; gap: 0 12px">
+            <div><label for="cli-tel">Teléfono</label><input id="cli-tel" name="telefono" maxlength="20" inputmode="tel" value="{{ factura.cliente_telefono }}"></div>
+            <div><label for="cli-correo">Correo</label><input id="cli-correo" name="correo" type="email" maxlength="254" value="{{ factura.cliente_correo }}"></div>
+          </div>
+          <div class="stack" style="margin-top: 6px">
+            <button class="btn sm" type="submit">Guardar datos del cliente</button>
+            {% if factura.personalizada %}<button class="btn sm secundario" type="submit" name="tipo" value="generica" formnovalidate>Pasar a consumidor final</button>{% endif %}
+          </div>
+        </form>
+      </details>
+      {% if factura.estado == "PAG" %}
+        <form class="card pila no-print" method="post" action="{% url 'caja:enviar_correo' factura.pk %}" style="gap: 8px; margin-top: 16px">
+          {% csrf_token %}
+          <h2 style="margin:0">Enviar la factura por correo</h2>
+          {% if factura.correo_enviado_en %}<p class="pill ok" style="margin:0; white-space: normal">Enviada a {{ factura.cliente_correo }} el {{ factura.correo_enviado_en|date:"d/m H:i" }}</p>
+          {% elif factura.correo_error %}<p class="pill crit" style="margin:0; white-space: normal">No se pudo enviar: revisa el correo o la configuración.</p>{% endif %}
+          <label class="oculto" for="correo-envio">Correo del cliente</label>
+          <input id="correo-envio" name="correo" type="email" maxlength="254" placeholder="correo@cliente.com" value="{{ factura.cliente_correo }}" required>
+          <button class="btn sm secundario" type="submit">{% if factura.correo_enviado_en %}Reenviar{% else %}Enviar{% endif %} factura</button>
+        </form>
+      {% endif %}
     {% endif %}
   </section>
 </div>

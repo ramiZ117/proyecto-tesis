@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}{% if es_caja %}Propinas{% else %}Mis propinas{% endif %}{% endblock %}
+{% block subtitle %}{% if es_caja %}Saldo a favor de cada mesero por las propinas de sus mesas{% else %}Lo que el negocio te debe por las propinas de tus mesas{% endif %}{% endblock %}
+{% block heading %}{% if es_caja %}Propinas{% else %}Mis propinas{% endif %}{% endblock %}
+{% block content %}
+<section class="pila subir" style="margin-bottom: 20px">
+  <h2 style="margin:0">Pendientes de entregar</h2>
+  {% for s in saldos %}
+    <div class="saldo-mesero">
+      <div class="stack">
+        <span class="avatar" aria-hidden="true">{{ s.mesero.username|slice:":1"|upper }}</span>
+        <div><strong>{{ s.mesero.get_full_name|default:s.mesero.username }}</strong><div class="obs">{{ s.cantidad }} propina{{ s.cantidad|pluralize }} sin entregar</div></div>
+      </div>
+      <div class="stack" style="gap: 16px">
+        <div style="text-align: right"><strong class="monto num">Bs {{ s.total_local|floatformat:"2g" }}</strong><div class="obs">≈ ${{ s.total_usd|floatformat:"2g" }}</div></div>
+        {% if es_caja %}
+          <form method="post" action="{% url 'caja:pagar_propinas' s.mesero.pk %}" data-confirmar="¿Confirmas que ya se le entregaron a {{ s.mesero.username }} sus propinas?">
+            {% csrf_token %}<button class="btn" type="submit">{% include "_icono.html" with nombre="check" grosor="2.4" %}Marcar pagadas</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  {% empty %}
+    <p class="vacio">{% if es_caja %}No hay propinas pendientes: todos los meseros están al día.{% else %}No tienes propinas pendientes por cobrar.{% endif %}</p>
+  {% endfor %}
+</section>
+<section class="card subir d2">
+  <h2>Últimas propinas</h2>
+  <div class="tabla-caja">
+    <table>
+      <thead><tr><th>Fecha</th>{% if es_caja %}<th>Mesero</th>{% endif %}<th>Cuenta</th><th>Método</th><th class="der">Monto</th><th>Estado</th></tr></thead>
+      <tbody>
+        {% for p in recientes %}
+          <tr>
+            <td>{{ p.registrada_en|date:"d/m H:i" }}</td>
+            {% if es_caja %}<td>{{ p.mesero.username }}</td>{% endif %}
+            <td>{{ p.factura.pedido.etiqueta }} · {% if es_caja %}<a href="{% url 'caja:factura' p.factura_id %}">{{ p.factura.numero }}</a>{% else %}{{ p.factura.numero }}{% endif %}</td>
+            <td>{{ p.get_metodo_display }}</td>
+            <td class="der num">{% if p.moneda == "USD" %}${{ p.monto|intcomma }}{% else %}Bs {{ p.monto|intcomma }}{% endif %}</td>
+            <td>{% if p.pagada %}<span class="pill ok">Entregada {{ p.pagada_en|date:"d/m" }}</span>{% else %}<span class="pill warn">Pendiente</span>{% endif %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="6" class="obs">Todavía no se han registrado propinas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

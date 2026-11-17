@@ -1,12 +1,16 @@
 """Recorrido de extremo a extremo usando solo las pantallas (peticiones HTTP), como lo haría el personal."""
 from decimal import Decimal
 
+from django.test import override_settings
+
 from caja.models import CierreCaja, Factura, TasaCambio
 from config.base_pruebas import DatosBase
 from inventario.models import Insumo
 from mesas.models import Mesa, Pedido
 
 
+# Pruebas anteriores al IGTF: verifican conversión, vuelto y cierre sin el 3 % (el IGTF tiene sus propias pruebas).
+@override_settings(IGTF_METODOS=[])
 class FlujoCompletoTests(DatosBase):
     def test_mesero_cocina_y_caja_atienden_una_mesa_de_principio_a_fin(self):
         mesero, chef, caja = self.cliente(self.mesero), self.cliente(self.chef), self.cliente(self.cajero)

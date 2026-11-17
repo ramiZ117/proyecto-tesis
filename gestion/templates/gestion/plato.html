@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}{% if producto.pk %}{{ producto.nombre }}{% else %}Nuevo plato{% endif %}{% endblock %}
+{% block subtitle %}Carta y recetas{% endblock %}
+{% block heading %}{% if producto.pk %}{{ producto.nombre }}{% else %}Nuevo plato{% endif %}{% endblock %}
+{% block top_actions %}<a class="btn secundario" href="{% url 'gestion:carta' %}">← Carta</a>{% endblock %}
+{% block content %}
+<form method="post" enctype="multipart/form-data" class="split" data-sin-parcial>
+  {% csrf_token %}
+  {{ receta.management_form }}
+  <section class="card principal subir pila" style="gap: 6px">
+    {% if form.non_field_errors %}{% for e in form.non_field_errors %}<p class="error-campo">{{ e }}</p>{% endfor %}{% endif %}
+    <div class="grid-auto" style="--min: 220px; gap: 0 16px">
+      {% include "gestion/_campo.html" with campo=form.nombre %}
+      {% include "gestion/_campo.html" with campo=form.categoria %}
+      {% include "gestion/_campo.html" with campo=form.precio_usd %}
+    </div>
+    {% include "gestion/_campo.html" with campo=form.descripcion %}
+    <div class="interruptores">
+      {% include "gestion/_campo.html" with campo=form.disponible %}
+      {% include "gestion/_campo.html" with campo=form.destacado %}
+      {% include "gestion/_campo.html" with campo=form.vegetariano %}
+      {% include "gestion/_campo.html" with campo=form.picante %}
+      {% include "gestion/_campo.html" with campo=form.sin_gluten %}
+    </div>
+
+    <div class="grid-auto" style="--min: 220px; gap: 0 16px; margin-top: 10px">
+      {% include "gestion/_campo.html" with campo=form.minutos_preparacion %}
+      {% include "gestion/_campo.html" with campo=form.opciones %}
+    </div>
+
+    <h3>Receta <span class="obs" style="font-weight: 600">· cantidad de cada insumo por porción (se descuenta al cobrar)</span></h3>
+    {% for e in receta.non_form_errors %}<p class="error-campo">{{ e }}</p>{% endfor %}
+    <div class="tabla-caja">
+      <table>
+        <thead><tr><th>Insumo</th><th style="width: 160px">Cantidad</th><th style="width: 90px">Quitar</th></tr></thead>
+        <tbody>
+          {% for f in receta %}
+            <tr>
+              <td>{% for h in f.hidden_fields %}{{ h }}{% endfor %}{{ f.insumo }}{% for e in f.insumo.errors %}<div class="error-campo">{{ e }}</div>{% endfor %}</td>
+              <td>{{ f.cantidad }}{% for e in f.cantidad.errors %}<div class="error-campo">{{ e }}</div>{% endfor %}</td>
+              <td>{% if f.instance.pk %}<label class="stack" style="margin:0">{{ f.DELETE }} Quitar</label>{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">Hay dos filas vacías para agregar insumos; guarda y vuelve a entrar si necesitas más.</p>
+    <div class="stack" style="margin-top: 8px">
+      <button class="btn grande" type="submit">Guardar plato</button>
+      <a class="btn secundario" href="{% url 'gestion:carta' %}">Cancelar</a>
+    </div>
+  </section>
+
+  <aside class="lateral subir d2">
+    <section class="card pila" style="gap: 10px">
+      <h2 style="margin:0">Foto del plato</h2>
+      <div class="vista-foto" id="vista-foto">
+        {% if producto.foto %}<img src="{{ producto.foto.url }}" alt="Foto actual de {{ producto.nombre }}">{% else %}<span class="sin-foto">{% include "_icono.html" with nombre="foto" grosor="1.5" %}Sin foto</span>{% endif %}
+      </div>
+      <label for="{{ form.foto.id_for_label }}" class="btn secundario bloque" style="margin: 0">{% include "_icono.html" with nombre="foto" %}{% if producto.foto %}Cambiar foto{% else %}Subir foto{% endif %}</label>
+      <input type="file" name="foto" id="{{ form.foto.id_for_label }}" accept="image/jpeg,image/png,image/webp" class="oculto" data-vista-previa="vista-foto">
+      {% if producto.foto %}<label class="stack" style="margin:0"><input type="checkbox" name="foto-clear" id="foto-clear_id"> Quitar la foto actual</label>{% endif %}
+      {% for e in form.foto.errors %}<p class="error-campo">{{ e }}</p>{% endfor %}
+      <p class="hint" style="margin:0">Mejor horizontal, con buena luz y el plato centrado. JPG, PNG o WEBP de hasta 6 MB; el sistema la ajusta para el menú.</p>
+      {% include "gestion/_campo.html" with campo=form.foto_credito %}
+    </section>
+  </aside>
+</form>
+<script>
+  document.querySelectorAll("[data-vista-previa]").forEach(function (input) {
+    input.addEventListener("change", function () {
+      var archivo = input.files && input.files[0];
+      var caja = document.getElementById(input.getAttribute("data-vista-previa"));
+      if (!archivo || !caja) return;
+      var img = document.createElement("img");
+      img.alt = "Vista previa de la foto nueva";
+      img.src = URL.createObjectURL(archivo);
+      caja.replaceChildren(img);
+    });
+  });
+</script>
+{% endblock %}

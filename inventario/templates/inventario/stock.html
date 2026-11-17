@@ -34,7 +34,7 @@
         <tbody>
           {% for i in insumos %}
             <tr class="{% if i.critico %}fila-critica{% endif %}" data-filtrable="insumos" data-categoria="{{ i.grupo }}" data-texto="{{ i.nombre }} {{ i.proveedor.nombre|default:'' }} {{ i.get_grupo_display }}">
-              <td><strong>{{ i.nombre }}</strong><div class="obs">{{ i.get_grupo_display }}{% if i.proveedor %} · {{ i.proveedor.nombre }}{% endif %}</div></td>
+              <td><a class="fuerte enlace-kardex" href="{% url 'inventario:kardex' i.pk %}" title="Ver kárdex">{{ i.nombre }}</a><div class="obs">{{ i.get_grupo_display }}{% if i.proveedor %} · {{ i.proveedor.nombre }}{% endif %}</div></td>
               <td>
                 <div class="nivel" title="Stock {{ i.stock_actual|floatformat:'-3' }} {{ i.abreviatura }}">
                   <div class="relleno {{ i.nivel }}" style="width: {{ i.pct_stock }}%"></div>
@@ -53,11 +53,12 @@
               </td>
             </tr>
           {% empty %}
-            <tr><td colspan="6" class="obs">No hay insumos activos. Cárgalos en el panel técnico.</td></tr>
+            <tr><td colspan="6" class="obs">No hay insumos activos. {% if es_admin %}<a href="{% url 'gestion:insumo_nuevo' %}">Crea el primero</a>.{% else %}Pide al administrador que los cargue.{% endif %}</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+    <nav class="paginador" data-paginar="insumos" data-por-pagina="12" aria-label="Páginas de insumos"></nav>
   </section>
 
   <div class="lateral">
@@ -94,6 +95,8 @@
       <div data-solo="ENT">
         <label for="mov-costo" style="margin-top:0">Costo por unidad en USD <span class="obs">(opcional, actualiza el costo)</span></label>
         <input id="mov-costo" name="costo" type="number" step="0.0001" min="0" max="99999" inputmode="decimal">
+        <label for="mov-documento">Documento <span class="obs">(factura o nota de entrega del proveedor)</span></label>
+        <input id="mov-documento" name="documento" maxlength="60" placeholder="Ej.: Fact. 004512">
         <p class="hint" style="margin: 6px 0 0">Proveedor: <strong data-proveedor>—</strong></p>
       </div>
       <div>
@@ -120,17 +123,18 @@
     <section id="recetas" class="card costos subir d5" aria-label="Costo y margen por plato">
       <h2>Costo y margen por plato</h2>
       {% for c in costos %}
-        <div class="fila">
+        <div class="fila" data-filtrable="costos">
           <span><strong>{{ c.producto.nombre }}</strong><small>Costo de receta ${{ c.costo_usd }} · precio ${{ c.precio_usd }}</small></span>
           <strong style="color: {% if c.margen < 55 %}var(--naranja-tinta){% else %}var(--verde-800){% endif %}">{{ c.margen }}%</strong>
         </div>
       {% empty %}
         <p class="obs" style="margin:0">Carga el costo de los insumos para ver el margen de cada plato.</p>
       {% endfor %}
+      <nav class="paginador" data-paginar="costos" data-por-pagina="8" aria-label="Páginas de platos"></nav>
     </section>
 
     <section class="card subir d5" aria-label="Últimos movimientos">
-      <h2>Últimos movimientos</h2>
+      <div class="card-cabecera" style="margin-bottom: 8px"><h2 style="margin:0">Últimos movimientos</h2><a class="btn sm secundario" href="{% url 'inventario:movimientos' %}">Ver todos y auditar</a></div>
       <div class="movs">
         {% for m in movimientos %}
           <div class="mov">

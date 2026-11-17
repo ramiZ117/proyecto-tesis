@@ -147,7 +147,8 @@ def _validar_cantidad(cantidad: Decimal, permitir_cero: bool = False) -> None:
 
 
 @transaction.atomic
-def registrar_entrada(insumo_id: int, cantidad: Decimal, nota: str = "", usuario=None, costo_unitario=None) -> MovimientoStock:
+def registrar_entrada(insumo_id: int, cantidad: Decimal, nota: str = "", usuario=None, costo_unitario=None,
+                      documento: str = "") -> MovimientoStock:
     """Reposición de stock (compra) con su movimiento de auditoría. Puede actualizar el costo del insumo."""
     _validar_cantidad(cantidad)
     insumo = Insumo.objects.select_for_update().get(pk=insumo_id)
@@ -161,7 +162,9 @@ def registrar_entrada(insumo_id: int, cantidad: Decimal, nota: str = "", usuario
         insumo=insumo,
         tipo=MovimientoStock.Tipo.ENTRADA,
         cantidad=cantidad,
+        stock_anterior=insumo.stock_actual - cantidad,
         stock_resultante=insumo.stock_actual,
+        documento=documento[:60],
         costo_unitario=insumo.costo_unitario,
         usuario=usuario,
         nota=nota[:200] or (f"Compra a {insumo.proveedor}" if insumo.proveedor else "Reposición de inventario"),
@@ -210,8 +213,72 @@ def registrar_ajuste(insumo_id: int, contado: Decimal, nota: str = "", usuario=N
         tipo=MovimientoStock.Tipo.AJUSTE,
         motivo=MovimientoStock.Motivo.CONTEO,
         cantidad=abs(contado - anterior),
+        stock_anterior=anterior,
         stock_resultante=contado,
+        documento=f"Conteo {timezone.localdate():%d/%m/%Y}",
         costo_unitario=insumo.costo_unitario,
         usuario=usuario,
         nota=(nota or f"Conteo de {autor}: {anterior.normalize():f} → {contado.normalize():f}")[:200],
     )
+
+
+
+# ---- consulta y auditoría de movimientos -----------------------------------------------------
+def saldo_al(insumo, momento) -> Decimal:
+    """Existencia de un insumo en un instante, reconstruida con su historial de movimientos."""
+    previo = insumo.movimientos.filter(creado_en__lt=momento).order_by("-creado_en", "-id").first()
+    if previo is not None:
+        return previo.stock_resultante
+    primero = insumo.movimientos.order_by("creado_en", "id").first()
+    if primero is not None and primero.stock_anterior is not None:
+        return primero.stock_anterior
+    return insumo.stock_actual
+
+
+def kardex(insumo, desde, hasta) -> dict:
+    """Kárdex del insumo entre `desde` y `hasta` (datetimes): saldo inicial, movimientos y saldo final."""
+    movimientos = list(insumo.movimientos.filter(creado_en__gte=desde, creado_en__lt=hasta)
+                       .select_related("usuario", "detalle_pedido__producto").order_by("creado_en", "id"))
+    inicial = saldo_al(insumo, desde)
+    saldo = inicial
+    filas, entradas, salidas = [], Decimal("0"), Decimal("0")
+    valor_entradas = valor_salidas = Decimal("0.00")
+    saltos = 0
+    for m in movimientos:
+        if m.stock_anterior is not None and m.stock_anterior != saldo:
+            saltos += 1  # el saldo no encadena con el movimiento anterior
+        variacion = m.variacion
+        if variacion >= 0:
+            entradas += variacion
+            valor_entradas += (variacion * m.costo_unitario).quantize(Decimal("0.01"))
+        else:
+            salidas += -variacion
+            valor_salidas += (-variacion * m.costo_unitario).quantize(Decimal("0.01"))
+        saldo = m.stock_resultante
+        filas.append({"mov": m, "entrada": variacion if variacion > 0 else None,
+                      "salida": -variacion if variacion < 0 else None, "saldo": saldo,
+                      "valor_saldo": (saldo * m.costo_unitario).quantize(Decimal("0.01"))})
+    return {
+        "inicial": inicial, "final": saldo, "filas": filas, "entradas": entradas, "salidas": salidas,
+        "valor_entradas": valor_entradas, "valor_salidas": valor_salidas, "saltos": saltos,
+        "valor_final": (saldo * insumo.costo_unitario).quantize(Decimal("0.01")),
+    }
+
+
+def auditar_inventario(insumos=None) -> list[dict]:
+    """Revisa que cada historial encadene (anterior = resultante del previo) y que termine en el stock actual.
+
+    Devuelve una fila por insumo con problemas; lista vacía = todo cuadra.
+    """
+    problemas = []
+    insumos = insumos if insumos is not None else Insumo.objects.all()
+    for insumo in insumos:
+        saldo, saltos = None, 0
+        for anterior, resultante in insumo.movimientos.order_by("creado_en", "id").values_list("stock_anterior", "stock_resultante"):
+            if saldo is not None and anterior is not None and anterior != saldo:
+                saltos += 1
+            saldo = resultante
+        diferencia = (insumo.stock_actual - saldo) if saldo is not None else Decimal("0")
+        if saltos or diferencia:
+            problemas.append({"insumo": insumo, "saltos": saltos, "diferencia": diferencia, "registrado": saldo})
+    return problemas

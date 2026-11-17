@@ -15,6 +15,73 @@
     document.dispatchEvent(new CustomEvent("contenido-actualizado", { detail: { raiz: raiz || document } }));
   }
 
+  /* ---- confirmaciones con el diseño del sistema (en vez del confirm() del navegador) ---- */
+  var ventana = null;
+  function ventanaConfirmar() {
+    if (ventana) return ventana;
+    ventana = document.createElement("dialog");
+    ventana.className = "confirmar";
+    ventana.setAttribute("aria-labelledby", "confirmar-titulo");
+    var cuerpo = document.createElement("form");
+    cuerpo.method = "dialog";
+    cuerpo.className = "confirmar-cuerpo";
+    var icono = document.createElement("div");
+    icono.className = "confirmar-icono";
+    icono.setAttribute("aria-hidden", "true");
+    icono.textContent = "?";
+    var titulo = document.createElement("h2");
+    titulo.id = "confirmar-titulo";
+    var botones = document.createElement("div");
+    botones.className = "confirmar-botones";
+    var no = document.createElement("button");
+    no.value = "no"; no.className = "btn secundario"; no.textContent = "Cancelar";
+    var si = document.createElement("button");
+    si.value = "si"; si.className = "btn"; si.textContent = "Sí, continuar";
+    botones.append(no, si);
+    cuerpo.append(icono, titulo, botones);
+    ventana.appendChild(cuerpo);
+    document.body.appendChild(ventana);
+    return ventana;
+  }
+
+  function preguntar(texto, peligro) {
+    var v = ventanaConfirmar();
+    v.querySelector("h2").textContent = texto;
+    v.classList.toggle("peligro", !!peligro);
+    v.querySelector(".confirmar-icono").textContent = peligro ? "!" : "?";
+    var si = v.querySelector("button[value=si]");
+    si.className = peligro ? "btn peligro" : "btn";
+    return new Promise(function (resolver) {
+      v.returnValue = "";
+      v.addEventListener("close", function alCerrar() {
+        v.removeEventListener("close", alCerrar);
+        resolver(v.returnValue === "si");
+      });
+      if (v.showModal) v.showModal(); else v.setAttribute("open", "");
+      v.querySelector("button[value=no]").focus();
+    });
+  }
+
+  document.addEventListener("click", function (e) {
+    if (ventana && e.target === ventana) ventana.close("no");  // tocar fuera = cancelar
+  });
+
+  // Se escucha en captura: corre antes que el envío sin recarga y lo detiene hasta que confirmen.
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    var texto = form.getAttribute && form.getAttribute("data-confirmar");
+    if (!texto) return;
+    if (form.getAttribute("data-confirmado") === "1") { form.removeAttribute("data-confirmado"); return; }
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    var boton = e.submitter && e.submitter.form === form ? e.submitter : null;
+    preguntar(texto, form.hasAttribute("data-confirmar-peligro")).then(function (ok) {
+      if (!ok) return;
+      form.setAttribute("data-confirmado", "1");
+      if (form.requestSubmit) form.requestSubmit(boton || undefined); else form.submit();
+    });
+  }, true);
+
   /* ---- refresco de pantallas vivas (mapa, cocina) ------------------------------ */
   var vigias = {};
 
@@ -34,6 +101,7 @@
             if (!nodoActual) return;
             if (nodoActual.getAttribute("data-ultimo") === null) { nodoActual.setAttribute("data-ultimo", html); return; }
             if (nodoActual.getAttribute("data-ultimo") !== html) {
+              nodoActual.classList.add("refrescado");
               nodoActual.innerHTML = html;
               nodoActual.setAttribute("data-ultimo", html);
               avisar(nodoActual);
@@ -131,7 +199,54 @@
       var okCat = !categoria || el.getAttribute("data-categoria") === categoria;
       if (okTexto && okCat) el.removeAttribute("data-oculto-filtro"); else el.setAttribute("data-oculto-filtro", "");
     });
+    paginas[grupo] = 1;
+    paginar(grupo);
   }
+
+  /* ---- paginación de listas largas (respeta los filtros) ----------------------------- */
+  var paginas = {};
+  function paginar(grupo) {
+    var nav = document.querySelector('[data-paginar="' + grupo + '"]');
+    if (!nav) return;
+    var porPagina = parseInt(nav.getAttribute("data-por-pagina"), 10) || 15;
+    var filas = Array.prototype.filter.call(document.querySelectorAll('[data-filtrable="' + grupo + '"]'), function (el) {
+      return !el.hasAttribute("data-oculto-filtro");
+    });
+    var total = Math.max(Math.ceil(filas.length / porPagina), 1);
+    var actual = Math.min(paginas[grupo] || 1, total);
+    paginas[grupo] = actual;
+    document.querySelectorAll('[data-filtrable="' + grupo + '"]').forEach(function (el) { el.removeAttribute("data-oculto-pagina"); });
+    filas.forEach(function (el, i) {
+      if (i < (actual - 1) * porPagina || i >= actual * porPagina) el.setAttribute("data-oculto-pagina", "");
+    });
+    nav.replaceChildren();
+    nav.hidden = total <= 1;
+    if (total <= 1) return;
+    function boton(texto, pagina, deshabilitado) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn sm secundario";
+      b.textContent = texto;
+      b.disabled = deshabilitado;
+      b.setAttribute("data-ir-pagina", pagina);
+      b.setAttribute("data-grupo", grupo);
+      return b;
+    }
+    var info = document.createElement("span");
+    info.className = "obs";
+    info.textContent = "Página " + actual + " de " + total + " · " + filas.length + " en total";
+    nav.append(boton("← Anterior", actual - 1, actual === 1), info, boton("Siguiente →", actual + 1, actual === total));
+  }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-ir-pagina]");
+    if (!b) return;
+    var grupo = b.getAttribute("data-grupo");
+    paginas[grupo] = parseInt(b.getAttribute("data-ir-pagina"), 10) || 1;
+    paginar(grupo);
+    var nav = document.querySelector('[data-paginar="' + grupo + '"]');
+    var contenedor = nav && (nav.previousElementSibling || nav.parentElement);
+    if (contenedor && contenedor.getBoundingClientRect().top < 0) contenedor.scrollIntoView({ block: "start", behavior: "smooth" });
+  });
 
   document.addEventListener("input", function (e) {
     var grupo = e.target.getAttribute && e.target.getAttribute("data-filtro-texto");
@@ -171,7 +286,7 @@
 
   function dosDigitos(n) { return (n < 10 ? "0" : "") + n; }
 
-  setInterval(function () {
+  function actualizarRelojes() {
     var ahora = Date.now() + desfase;
     document.querySelectorAll("[data-desde]").forEach(function (el) {
       var desde = Date.parse(el.getAttribute("data-desde"));
@@ -186,7 +301,8 @@
       var d = new Date(ahora);
       el.textContent = dosDigitos(d.getHours()) + ":" + dosDigitos(d.getMinutes()) + ":" + dosDigitos(d.getSeconds());
     });
-  }, 1000);
+  }
+  setInterval(actualizarRelojes, 1000);
 
   /* ---- aviso sonoro de cocina ------------------------------------------------ */
   var nuevosPrevios = null;
@@ -237,6 +353,23 @@
     nuevosPrevios = n;
   }
 
+  /* Salón: suena cuando una mesa llama al mesero desde el menú digital. */
+  var enLineaPrevios = null;
+  function revisarEnLinea() {
+    if (!document.getElementById("en-linea")) return;
+    var n = document.querySelectorAll("#en-linea [data-por-verificar], #en-linea [data-listo-retirar]").length;
+    if (enLineaPrevios !== null && n > enLineaPrevios) campana();
+    enLineaPrevios = n;
+  }
+
+  var llamadosPrevios = null;
+  function revisarLlamados() {
+    if (!document.getElementById("mapa")) return;
+    var n = document.querySelectorAll("#mapa .mesa.llamando").length;
+    if (llamadosPrevios !== null && n > llamadosPrevios) campana();
+    llamadosPrevios = n;
+  }
+
   /* ---- caja: cálculo del vuelto en vivo -------------------------------------- */
   function numero(texto) {
     var v = parseFloat(String(texto || "").replace(/\s/g, "").replace(",", "."));
@@ -245,38 +378,91 @@
 
   function bs(n) { return "Bs " + n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
+  function filasDePago(form) {
+    var marcado = form.querySelector("input[name=metodo]:checked");
+    var filas = [{ metodo: marcado ? marcado.value : "EFE", monto: numero((form.querySelector("#monto_recibido") || {}).value) }];
+    form.querySelectorAll("[data-fila-pago]:not([hidden])").forEach(function (f) {
+      var monto = numero(f.querySelector("[name=monto_recibido]").value);
+      if (monto > 0) filas.push({ metodo: f.querySelector("[name=metodo]").value, monto: monto });
+    });
+    return filas;
+  }
+
+  var METODOS_USD = ["DIV", "BIN", "ZIN"];
+  var SIN_VUELTO = ["PMO", "TAR", "BIN", "ZIN"];
+  function enDolares(m) { return METODOS_USD.indexOf(m) >= 0; }
+
+  /* Simula lo que hará el servidor: primero los métodos sin vuelto y al final efectivo y divisa. */
+  function simularCobro(filas, saldo, tasa, igtf, conIgtf) {
+    igtf = igtf || 0; conIgtf = conIgtf || [];
+    var igtfTotal = 0;
+    var orden = filas.map(function (f, i) { return { f: f, i: i }; }).sort(function (a, b) {
+      var va = (a.f.metodo === "EFE" || a.f.metodo === "DIV") ? 1 : 0;
+      var vb = (b.f.metodo === "EFE" || b.f.metodo === "DIV") ? 1 : 0;
+      return va - vb || a.i - b.i;
+    });
+    var aplicado = 0, vuelto = 0, error = "", restante = saldo;
+    orden.forEach(function (x) {
+      if (error) return;
+      var f = x.f, esUsd = enDolares(f.metodo);
+      if (restante <= 0.004) { error = "Sobra un pago: con los anteriores ya se cubre el total."; return; }
+      var equivalente = esUsd ? Math.round(f.monto * tasa * 100) / 100 : f.monto;
+      var cubre = esUsd ? f.monto >= Math.round(restante / tasa * 100) / 100 : equivalente >= restante;
+      if (conIgtf.indexOf(f.metodo) >= 0) {
+        /* Divisa en efectivo: además de la deuda se cobra el IGTF sobre lo que cubre. */
+        var factor = 1 + igtf / 100;
+        var necesario = Math.round(restante * factor * 100) / 100;
+        var cubreConIgtf = equivalente >= necesario - 0.004 || f.monto >= Math.round(necesario / tasa * 100) / 100;
+        var aplicaI = cubreConIgtf ? restante : Math.min(Math.round(equivalente / factor * 100) / 100, restante);
+        var impuesto = cubreConIgtf ? necesario - restante : equivalente - aplicaI;
+        igtfTotal += impuesto;
+        if (cubreConIgtf) vuelto += Math.max(equivalente - necesario, 0);
+        aplicado += aplicaI;
+        restante = Math.round((restante - aplicaI) * 100) / 100;
+        return;
+      }
+      var excede = esUsd ? f.monto > Math.round(restante / tasa * 100) / 100 + 0.004 : equivalente > restante + 0.004;
+      if (SIN_VUELTO.indexOf(f.metodo) >= 0 && excede) {
+        error = "Un pago sin vuelto (pago móvil, tarjeta, Binance o Zinli) supera lo que falta."; return;
+      }
+      var aplica = cubre ? restante : Math.min(equivalente, restante);
+      if (SIN_VUELTO.indexOf(f.metodo) < 0) vuelto += Math.max(equivalente - restante, 0);
+      aplicado += aplica;
+      restante = Math.round((restante - aplica) * 100) / 100;
+    });
+    return { aplicado: aplicado, vuelto: vuelto, restante: Math.max(restante, 0), error: error, igtf: igtfTotal };
+  }
+
   function recalcularCobro(form) {
     var saldo = numero(form.getAttribute("data-saldo"));
     var tasa = numero(form.getAttribute("data-tasa"));
     var marcado = form.querySelector("input[name=metodo]:checked");
     var metodo = marcado ? marcado.value : "EFE";
-    var esUsd = metodo === "DIV";
-    var monto = numero((form.querySelector("[name=monto_recibido]") || {}).value);
-    var equivalente = esUsd ? Math.round(monto * tasa * 100) / 100 : monto;
-    var cubre = esUsd ? (saldo > 0 && monto >= Math.round(saldo / tasa * 100) / 100) : equivalente >= saldo;
-    var aplicado = cubre ? saldo : Math.min(equivalente, saldo);
-    var vuelto = Math.max(equivalente - saldo, 0);
-    var sinVuelto = (metodo === "PMO" || metodo === "TAR") && vuelto > 0.004;
+    var esUsd = enDolares(metodo);
+    var filas = filasDePago(form);
+    var conIgtf = (form.getAttribute("data-igtf-metodos") || "").split(",");
+    var r = simularCobro(filas, saldo, tasa, numero(form.getAttribute("data-igtf")), conIgtf);
     var poner = function (sel, texto) { var n = form.querySelector(sel); if (n) n.textContent = texto; };
+    var filaIgtf = form.querySelector("[data-fila-igtf]");
+    if (filaIgtf) { filaIgtf.hidden = !(r.igtf > 0.004) || !!r.error; poner("[data-igtf-monto]", bs(r.igtf)); }
     poner("[data-simbolo]", esUsd ? "$" : "Bs");
     poner("[data-moneda]", esUsd ? "dólares" : "bolívares");
-    poner("[data-aplicado]", bs(aplicado));
-    poner("[data-vuelto]", bs(sinVuelto ? 0 : vuelto));
+    poner("[data-aplicado]", bs(r.aplicado) + (filas.length > 1 ? " (" + filas.length + " pagos)" : ""));
+    poner("[data-vuelto]", bs(r.error ? 0 : r.vuelto));
     var aviso = form.querySelector("[data-aviso]");
-    if (aviso) aviso.hidden = !sinVuelto;
+    if (aviso) { aviso.hidden = !r.error; aviso.textContent = r.error; }
     var caja = form.querySelector(".calculo");
-    if (caja) caja.classList.toggle("error", sinVuelto);
+    if (caja) caja.classList.toggle("error", !!r.error);
     var ref = form.querySelector("[data-referencia]");
-    if (ref) ref.hidden = !(metodo === "PMO" || metodo === "TAR");
+    if (ref) ref.hidden = !(metodo === "PMO" || metodo === "TAR" || metodo === "BIN" || metodo === "ZIN");
     var enviar = form.querySelector("[data-cobrar]");
     if (enviar) {
-      enviar.disabled = monto <= 0 || sinVuelto;
-      enviar.textContent = cubre && !sinVuelto ? "Cobrar y cerrar cuenta" : "Registrar pago parcial";
+      enviar.disabled = filas[0].monto <= 0 || !!r.error;
+      enviar.textContent = r.restante <= 0.004 && !r.error ? "Cobrar y cerrar cuenta" : "Registrar pago parcial";
     }
     form.querySelectorAll("[data-rapido]").forEach(function (b) {
       var valor = b.getAttribute(esUsd ? "data-usd" : "data-bs");
       b.hidden = !valor;
-      if (valor && b.hasAttribute("data-etiqueta-usd")) b.textContent = esUsd ? b.getAttribute("data-etiqueta-usd") : b.getAttribute("data-etiqueta-bs");
     });
   }
 
@@ -287,20 +473,45 @@
   document.addEventListener("change", function (e) {
     var form = e.target.closest && e.target.closest("form[data-cobro]");
     if (!form) return;
-    if (e.target.name === "metodo") {
+    if (e.target.name === "metodo" && e.target.type === "radio") {
       var exacto = form.querySelector("[data-rapido][data-exacto]");
-      var campo = form.querySelector("[name=monto_recibido]");
-      if (exacto && campo) campo.value = exacto.getAttribute(e.target.value === "DIV" ? "data-usd" : "data-bs");
+      var campo = form.querySelector("#monto_recibido");
+      var igtfM = (form.getAttribute("data-igtf-metodos") || "").split(",");
+      if (exacto && campo) campo.value = exacto.getAttribute(igtfM.indexOf(e.target.value) >= 0 ? "data-usd-igtf" : enDolares(e.target.value) ? "data-usd" : "data-bs");
     }
     recalcularCobro(form);
   });
   document.addEventListener("click", function (e) {
+    var agregar = e.target.closest && e.target.closest("[data-agregar-pago]");
+    if (agregar) {
+      var formA = agregar.closest("form[data-cobro]");
+      var libre = formA.querySelector("[data-fila-pago][hidden]");
+      if (libre) {
+        libre.hidden = false;
+        libre.querySelectorAll("select, input").forEach(function (c) { c.disabled = false; });
+        libre.querySelector("[name=monto_recibido]").focus();
+      }
+      agregar.hidden = !formA.querySelector("[data-fila-pago][hidden]");
+      recalcularCobro(formA);
+      return;
+    }
+    var quitar = e.target.closest && e.target.closest("[data-quitar-fila]");
+    if (quitar) {
+      var fila = quitar.closest("[data-fila-pago]");
+      var formQ = quitar.closest("form[data-cobro]");
+      fila.hidden = true;
+      fila.querySelectorAll("select, input").forEach(function (c) { c.disabled = true; if (c.tagName === "INPUT") c.value = ""; });
+      formQ.querySelector("[data-agregar-pago]").hidden = false;
+      recalcularCobro(formQ);
+      return;
+    }
     var b = e.target.closest && e.target.closest("[data-rapido]");
     if (!b) return;
     var form = b.closest("form[data-cobro]");
     var marcado = form.querySelector("input[name=metodo]:checked");
-    var esUsd = marcado && marcado.value === "DIV";
-    form.querySelector("[name=monto_recibido]").value = b.getAttribute(esUsd ? "data-usd" : "data-bs");
+    var esUsd = marcado && enDolares(marcado.value);
+    var conIgtfR = marcado && (form.getAttribute("data-igtf-metodos") || "").split(",").indexOf(marcado.value) >= 0;
+    form.querySelector("#monto_recibido").value = b.getAttribute(conIgtfR && b.hasAttribute("data-usd-igtf") ? "data-usd-igtf" : esUsd ? "data-usd" : "data-bs");
     recalcularCobro(form);
   });
 
@@ -371,9 +582,13 @@
   /* ---- inicialización ------------------------------------------------------- */
   function inicializar(raiz) {
     leerDesfase(raiz);
+    actualizarRelojes();
     restaurarFiltros(raiz);
+    (raiz || document).querySelectorAll("[data-paginar]").forEach(function (nav) { paginar(nav.getAttribute("data-paginar")); });
     pintarBotonSonido();
     revisarNuevos(raiz);
+    revisarLlamados();
+    revisarEnLinea();
     document.querySelectorAll("form[data-cobro]").forEach(recalcularCobro);
     document.querySelectorAll("form[data-movimiento]").forEach(pintarMovimiento);
   }
@@ -382,3 +597,4 @@
   vigilar();
   inicializar(document);
 })();
+

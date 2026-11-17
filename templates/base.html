@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0F3D2A">
   <title>{% block title %}Panel{% endblock %} · El Amir</title>
-  <link rel="icon" href="{% static 'img/logo-el-amir.jpg' %}">
+  <link rel="icon" href="{% static 'img/logo-el-amir-icono.jpg' %}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Reem+Kufi:wght@600;700&display=swap" rel="stylesheet">
@@ -16,7 +16,7 @@
   <div class="layout">
     <aside class="sidebar">
       <a class="marca" href="{% url 'inicio' %}">
-        <img src="{% static 'img/logo-el-amir.jpg' %}" alt="Logo de Comida Árabe El Amir" width="46" height="46">
+        <img src="{% static 'img/logo-el-amir-icono.jpg' %}" alt="Logo de Comida Árabe El Amir" width="46" height="46">
         <div><strong>El Amir</strong><span>Comida Árabe · desde 1995</span></div>
       </a>
       {% with seccion=request.resolver_match.namespace vista=request.resolver_match.url_name %}
@@ -26,23 +26,31 @@
         {% endif %}
         {% if es_mesero %}
           <a href="{% url 'mesas:mapa' %}" class="{% if seccion == 'mesas' %}activo{% endif %}">{% include "_icono.html" with nombre="mesas" %}Salón</a>
+          {% if not es_cajero %}<a href="{% url 'caja:propinas' %}" class="{% if vista == 'propinas' %}activo{% endif %}">{% include "_icono.html" with nombre="persona" %}Mis propinas</a>{% endif %}
         {% endif %}
         {% if es_cocinero %}
           <a href="{% url 'cocina:kds' %}" class="{% if seccion == 'cocina' %}activo{% endif %}">{% include "_icono.html" with nombre="cocina" %}Cocina</a>
         {% endif %}
         {% if es_cajero %}
-          <a href="{% url 'caja:cuentas' %}" class="{% if seccion == 'caja' and vista != 'tasa' and vista != 'cierre' and vista != 'reporte' and vista != 'historial' and vista != 'cierre_detalle' %}activo{% endif %}">{% include "_icono.html" with nombre="caja" %}Caja</a>
+          <a href="{% url 'caja:cuentas' %}" class="{% if seccion == 'caja' and vista != 'tasa' and vista != 'cierre' and vista != 'reporte' and vista != 'historial' and vista != 'cierre_detalle' and vista != 'propinas' and vista != 'en_linea' %}activo{% endif %}">{% include "_icono.html" with nombre="caja" %}Caja</a>
+          <a href="{% url 'caja:en_linea' %}" class="{% if vista == 'en_linea' %}activo{% endif %}">{% include "_icono.html" with nombre="llevar" %}Pedidos en línea{% if en_linea_pendientes %}<span class="contador">{{ en_linea_pendientes }}</span>{% endif %}</a>
           <a href="{% url 'caja:tasa' %}" class="{% if vista == 'tasa' %}activo{% endif %}">{% include "_icono.html" with nombre="tasa" %}Tasa de cambio</a>
+          <a href="{% url 'caja:propinas' %}" class="{% if vista == 'propinas' %}activo{% endif %}">{% include "_icono.html" with nombre="persona" %}Propinas</a>
           <a href="{% url 'caja:cierre' %}" class="{% if vista == 'cierre' or vista == 'historial' or vista == 'cierre_detalle' %}activo{% endif %}">{% include "_icono.html" with nombre="cierre" %}Cierre de caja</a>
           <a href="{% url 'caja:reporte' %}" class="{% if vista == 'reporte' %}activo{% endif %}">{% include "_icono.html" with nombre="reportes" %}Reporte del día</a>
-          <a href="{% url 'inventario:stock' %}" class="{% if seccion == 'inventario' %}activo{% endif %}">{% include "_icono.html" with nombre="inventario" %}Inventario{% if insumos_criticos %}<span class="contador" id="aviso-stock">{{ insumos_criticos|length }}</span>{% endif %}</a>
+          <a href="{% url 'inventario:stock' %}" class="{% if seccion == 'inventario' and vista != 'movimientos' and vista != 'kardex' %}activo{% endif %}">{% include "_icono.html" with nombre="inventario" %}Inventario{% if insumos_criticos %}<span class="contador" id="aviso-stock">{{ insumos_criticos|length }}</span>{% endif %}</a>
+          <a href="{% url 'inventario:movimientos' %}" class="{% if vista == 'movimientos' or vista == 'kardex' %}activo{% endif %}">{% include "_icono.html" with nombre="libro" %}Movimientos de inventario</a>
         {% endif %}
         {% if es_admin %}
           <div class="nav-titulo">Administración</div>
           <a href="{% url 'usuarios' %}" class="{% if vista == 'usuarios' or vista == 'usuario_nuevo' or vista == 'usuario_editar' %}activo{% endif %}">{% include "_icono.html" with nombre="usuarios" %}Usuarios</a>
-          <a href="{% url 'admin:inventario_producto_changelist' %}">{% include "_icono.html" with nombre="libro" %}Carta y recetas</a>
-          <a href="{% url 'admin:inventario_proveedor_changelist' %}">{% include "_icono.html" with nombre="camion" %}Proveedores</a>
-          <a href="{% url 'admin:index' %}">{% include "_icono.html" with nombre="admin" %}Panel técnico</a>
+          <a href="{% url 'gestion:carta' %}" class="{% if seccion == 'gestion' and vista == 'carta' or vista == 'plato' or vista == 'plato_nuevo' or vista == 'categoria' or vista == 'categoria_nueva' %}activo{% endif %}">{% include "_icono.html" with nombre="libro" %}Carta y recetas</a>
+          <a href="{% url 'gestion:promociones' %}" class="{% if vista == 'promociones' or vista == 'promocion' or vista == 'promocion_nueva' %}activo{% endif %}">{% include "_icono.html" with nombre="promo" %}Promociones</a>
+          <a href="{% url 'gestion:insumos' %}" class="{% if vista == 'insumos' or vista == 'insumo' or vista == 'insumo_nuevo' %}activo{% endif %}">{% include "_icono.html" with nombre="inventario" %}Insumos</a>
+          <a href="{% url 'gestion:proveedores' %}" class="{% if vista == 'proveedores' or vista == 'proveedor' or vista == 'proveedor_nuevo' %}activo{% endif %}">{% include "_icono.html" with nombre="camion" %}Proveedores</a>
+          <a href="{% url 'gestion:mesas' %}" class="{% if seccion == 'gestion' and vista == 'mesas' or vista == 'mesa' or vista == 'mesa_nueva' %}activo{% endif %}">{% include "_icono.html" with nombre="mesas" %}Mesas</a>
+          <a href="{% url 'gestion:menu_digital' %}" class="{% if vista == 'menu_digital' %}activo{% endif %}">{% include "_icono.html" with nombre="qr" %}Menú digital</a>
+          <a href="{% url 'gestion:ajustes' %}" class="{% if vista == 'ajustes' %}activo{% endif %}">{% include "_icono.html" with nombre="caja" %}Cobros y delivery</a>
         {% endif %}
       </nav>
       {% endwith %}

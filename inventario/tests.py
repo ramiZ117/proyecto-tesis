@@ -200,23 +200,16 @@ class DisponibilidadYReposicionTests(DatosBase):
         r = self.cliente(self.mesero).post("/inventario/entrada/", {"insumo_id": self.pan.pk, "cantidad": "5"})
         self.assertEqual(r.status_code, 403)
 
-    def test_ajuste_manual_en_el_admin_queda_registrado(self):
-        from django.contrib import admin as django_admin
-        from django.test import RequestFactory
-
-        from inventario.admin import InsumoAdmin
-
-        request = RequestFactory().post("/")
-        request.user = self.admin
-        modelo_admin = InsumoAdmin(Insumo, django_admin.site)
-
-        class FormaFalsa:
-            changed_data = ["stock_actual"]
-
-        self.pan.stock_actual = Decimal("9")
-        modelo_admin.save_model(request, self.pan, FormaFalsa(), change=True)
-        mov = MovimientoStock.objects.get(insumo=self.pan, tipo=MovimientoStock.Tipo.AJUSTE)
-        self.assertEqual(mov.cantidad, Decimal("4"))
+    def test_la_ficha_del_insumo_no_cambia_el_stock(self):
+        """El stock solo se mueve con entradas, mermas o ajustes (quedan como movimientos)."""
+        r = self.cliente(self.admin).post(f"/gestion/insumos/{self.pan.pk}/", {
+            "nombre": "Pan", "grupo": "PAN", "unidad": "UN", "costo_unitario": "0.25",
+            "stock_minimo": "1", "punto_reposicion": "2", "stock_maximo": "10", "activo": "on", "stock_actual": "999",
+        })
+        self.assertEqual(r.status_code, 302)
+        self.pan.refresh_from_db()
+        self.assertEqual((self.pan.stock_actual, self.pan.grupo), (Decimal("5.000"), "PAN"))
+        self.assertFalse(MovimientoStock.objects.exists())
 
     def test_precio_en_moneda_local_sigue_a_la_tasa_vigente(self):
         self.assertEqual(self.bistec.precio_local, Decimal("400.00"))

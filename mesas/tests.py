@@ -19,7 +19,7 @@ class MapaDeMesasTests(DatosBase):
 
     def test_mapa_usa_la_posicion_de_cada_mesa(self):
         r = self.cliente(self.mesero).get("/mesas/")
-        self.assertContains(r, "grid-column: 2; grid-row: 1")
+        self.assertContains(r, "grid-column: 2 / span 1; grid-row: 1")
 
     def test_mapa_parcial_para_refresco_automatico(self):
         r = self.cliente(self.mesero).get("/mesas/parcial/")

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Proveedores{% endblock %}
+{% block subtitle %}Contactos para la lista de compra de Inventario{% endblock %}
+{% block heading %}Proveedores{% endblock %}
+{% block top_actions %}<a class="btn" href="{% url 'gestion:proveedor_nuevo' %}">{% include "_icono.html" with nombre="mas" grosor="2.4" %}Nuevo proveedor</a>{% endblock %}
+{% block content %}
+<section class="grid-auto" style="--min: 260px">
+  {% for p in proveedores %}
+    <article class="card pila alzar subir" style="gap: 8px{% if not p.activo %}; opacity: .6{% endif %}">
+      <div class="stack" style="justify-content: space-between">
+        <strong style="font-size: 16px">{{ p.nombre }}</strong>
+        {% if p.activo %}<span class="pill ok">Activo</span>{% else %}<span class="pill gris">Inactivo</span>{% endif %}
+      </div>
+      <span class="obs">{{ p.contacto|default:"Sin persona de contacto" }}</span>
+      {% if p.telefono %}<a href="tel:{{ p.telefono }}" class="fuerte">{{ p.telefono }}</a>{% endif %}
+      <span class="obs">{{ p.n_insumos }} insumo{{ p.n_insumos|pluralize }} activo{{ p.n_insumos|pluralize }}</span>
+      <a class="btn sm secundario" style="align-self: flex-start" href="{% url 'gestion:proveedor' p.pk %}">{% include "_icono.html" with nombre="editar" %}Editar</a>
+    </article>
+  {% empty %}
+    <p class="vacio" style="grid-column: 1 / -1">Todavía no hay proveedores.</p>
+  {% endfor %}
+</section>
+{% endblock %}

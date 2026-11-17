@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Promociones{% endblock %}
+{% block subtitle %}Combos con precio especial: los ven los clientes en el menú digital y los meseros en la comanda{% endblock %}
+{% block heading %}Promociones{% endblock %}
+{% block top_actions %}
+  <a class="btn" href="{% url 'gestion:promocion_nueva' %}">{% include "_icono.html" with nombre="mas" grosor="2.4" %}Nueva promoción</a>
+{% endblock %}
+{% block content %}
+<div class="grid-auto subir" style="--min: 280px">
+  {% for p in promociones %}
+    <article class="card tarjeta-plato alzar{% if not p.vigente_hoy %} apagado{% endif %}">
+      <a class="tarjeta-foto" href="{% url 'gestion:promocion' p.pk %}" aria-label="Editar {{ p.nombre }}">
+        {% if p.foto %}<img src="{{ p.foto.url }}" alt="" loading="lazy">{% else %}<span class="sin-foto">{% include "_icono.html" with nombre="promo" grosor="1.5" %}Sin foto</span>{% endif %}
+      </a>
+      <div class="tarjeta-cuerpo">
+        <div class="stack" style="justify-content: space-between; align-items: baseline">
+          <strong>{{ p.nombre }}</strong><strong class="num" style="color: var(--verde-800)">${{ p.precio_usd }}</strong>
+        </div>
+        <ul class="lista-combo">
+          {% for i in p.items.all %}<li>{{ i.cantidad }} × {{ i.producto.nombre }}</li>{% empty %}<li class="obs">Sin platos</li>{% endfor %}
+        </ul>
+        <div class="stack" style="gap: 6px">
+          {% if not p.activa %}<span class="pill gris">Oculta</span>
+          {% elif not p.vigente_hoy %}<span class="pill warn">Fuera de fecha</span>
+          {% elif not p.disponible %}<span class="pill crit">Un plato no está disponible</span>
+          {% else %}<span class="pill ok">Visible</span>{% endif %}
+          {% if p.ahorro_usd %}<span class="pill info">Ahorra ${{ p.ahorro_usd }}</span>{% else %}<span class="pill warn">Sin ahorro</span>{% endif %}
+        </div>
+        {% if p.desde or p.hasta %}<span class="obs">{% if p.desde %}Desde {{ p.desde|date:"d/m/Y" }}{% endif %}{% if p.hasta %} hasta {{ p.hasta|date:"d/m/Y" }}{% endif %}</span>{% endif %}
+        <div class="stack" style="margin-top: auto">
+          <a class="btn sm" href="{% url 'gestion:promocion' p.pk %}">{% include "_icono.html" with nombre="editar" %}Editar</a>
+          <form method="post" action="{% url 'gestion:promocion_activa' p.pk %}">
+            {% csrf_token %}
+            <button class="btn sm {% if p.activa %}secundario{% else %}amarillo{% endif %}" type="submit">{% if p.activa %}Ocultar{% else %}Mostrar{% endif %}</button>
+          </form>
+        </div>
+      </div>
+    </article>
+  {% empty %}
+    <div class="vacio" style="grid-column: 1 / -1">Todavía no hay promociones. Crea una, por ejemplo «2 shawarmas + 1 bebida por $14».</div>
+  {% endfor %}
+</div>
+{% endblock %}

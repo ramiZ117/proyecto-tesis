@@ -41,7 +41,9 @@ def tasa(request):
     if not (en_grupo(request.user, GRUPO_CAJA) or en_grupo(request.user, GRUPO_MESERO)):
         return {}
     from caja.models import TasaCambio
+    from caja.tasa_bcv import revisar_en_segundo_plano
 
+    revisar_en_segundo_plano()  # consulta el BCV como mucho cada TASA_BCV_HORAS, sin hacer esperar la página
     return {"tasa_vigente": TasaCambio.objects.filter(activa=True).order_by("-vigente_desde").first()}
 
 
@@ -55,3 +57,15 @@ def alertas_inventario(request):
     from inventario.servicios import nombres_insumos_criticos
 
     return {"insumos_criticos": nombres_insumos_criticos()}
+
+
+def pedidos_en_linea(request):
+    """Contador en el menú de caja: pagos por verificar y pedidos listos para avisar."""
+    user = request.user
+    if not user.is_authenticated or _es_fragmento(request) or not en_grupo(user, GRUPO_CAJA):
+        return {}
+    from mesas.models import PedidoEnLinea
+
+    activos = PedidoEnLinea.objects.filter(estado__in=[PedidoEnLinea.Estado.POR_VERIFICAR, PedidoEnLinea.Estado.ACEPTADO]).select_related("pedido")
+    pendientes = sum(1 for p in activos if p.etapa in ("verificar", "listo"))
+    return {"en_linea_pendientes": pendientes}

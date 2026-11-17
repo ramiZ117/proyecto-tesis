@@ -1,0 +1,65 @@
+{% load static humanize %}<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0F3D2A">
+  <meta name="robots" content="noindex">
+  <title>Pedido {{ pedido.codigo }} · {{ local.nombre }}</title>
+  <link rel="icon" href="{% static 'img/logo-el-amir-icono.jpg' %}">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'css/menu.css' %}?v={{ version_app }}">
+</head>
+<body class="pagina-retiro">
+  <main class="seguimiento" data-estado-url="{% url 'menu:retiro_estado' pedido.token %}?json=1" data-etapa="{{ estado.etapa }}">
+    <img class="logo" src="{% static 'img/logo-el-amir-icono.jpg' %}" alt="{{ local.nombre }}" width="72" height="72">
+    <p class="codigo-retiro">Pedido <strong>{{ pedido.codigo }}</strong> · {{ pedido.cliente_nombre }}</p>
+    <ol class="pasos-retiro" aria-label="Estado del pedido">
+      <li data-paso="verificar">Pago</li><li data-paso="cocina">Cocina</li><li data-paso="listo">Listo</li><li data-paso="entregado">Retirado</li>
+    </ol>
+    <section class="estado-retiro {{ estado.etapa }}" aria-live="polite">
+      <h1 id="estado-titulo">{{ estado.titulo }}</h1>
+      <p id="estado-detalle">{{ estado.detalle }}</p>
+      <p class="tiempo-retiro" id="estado-tiempo"{% if not estado.minutos %} hidden{% endif %}>{% if estado.minutos %}Tiempo estimado: ~{{ estado.minutos }} min{% if estado.etapa == "verificar" %} desde que verifiquemos el pago{% endif %}{% endif %}</p>
+    </section>
+    <section class="resumen-retiro">
+      <h2>Tu pedido</h2>
+      <ul>{% for l in pedido.lineas %}<li><span>{{ l.cantidad }} × {{ l.nombre }}</span></li>{% endfor %}</ul>
+      <p class="total-retiro">Pagado por {{ pedido.metodo_nombre }}: <strong>{% if pedido.en_usd %}${{ pedido.monto|intcomma }}{% else %}Bs {{ pedido.monto|intcomma }}{% endif %}</strong> · ref. {{ pedido.referencia }}</p>
+    </section>
+    <p class="muted ayuda-retiro">Guarda esta página: aquí verás cuando tu pedido esté listo. ¿Dudas? {% if local.whatsapp %}<a href="{{ local.whatsapp }}" target="_blank" rel="noopener">Escríbenos por WhatsApp</a>{% else %}Llámanos al {{ local.telefono }}{% endif %}.</p>
+    <a class="boton-agregar" href="{% url 'menu:carta' %}">Volver al menú</a>
+  </main>
+  <script>
+    (function () {
+      var raiz = document.querySelector(".seguimiento");
+      var orden = ["verificar", "cocina", "listo", "entregado"];
+      function pintar(etapa) {
+        var i = orden.indexOf(etapa);
+        document.querySelectorAll("[data-paso]").forEach(function (li, n) {
+          li.className = etapa === "rechazado" ? "" : (n < i ? "hecho" : n === i ? "actual" : "");
+        });
+        document.querySelector(".estado-retiro").className = "estado-retiro " + etapa;
+      }
+      pintar(raiz.getAttribute("data-etapa"));
+      var vigia = setInterval(function () {
+        fetch(raiz.getAttribute("data-estado-url"), { credentials: "same-origin" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!d) return;
+            document.getElementById("estado-titulo").textContent = d.titulo;
+            document.getElementById("estado-detalle").textContent = d.detalle;
+            var tiempo = document.getElementById("estado-tiempo");
+            tiempo.hidden = !d.minutos;
+            if (d.minutos) tiempo.textContent = "Tiempo estimado: ~" + d.minutos + " min" + (d.etapa === "verificar" ? " desde que verifiquemos el pago" : "");
+            pintar(d.etapa);
+            if (d.etapa === "entregado" || d.etapa === "rechazado") {
+              clearInterval(vigia);
+              try { localStorage.removeItem("menu-retiro-en-curso"); } catch (e) { /* nada */ }
+            }
+          }).catch(function () {});
+      }, 10000);
+    })();
+  </script>
+</body>
+</html>

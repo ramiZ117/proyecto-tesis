@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Kárdex · {{ insumo.nombre }}{% endblock %}
+{% block subtitle %}Kárdex del insumo · {{ desde|date:"d/m/Y" }} al {{ hasta|date:"d/m/Y" }}{% if insumo.proveedor %} · proveedor {{ insumo.proveedor.nombre }}{% endif %}{% endblock %}
+{% block heading %}{{ insumo.nombre }}{% endblock %}
+{% block top_actions %}
+  <a class="btn secundario" href="{% url 'inventario:movimientos' %}?insumo={{ insumo.pk }}">Movimientos</a>
+  <a class="btn secundario" href="?desde={{ desde|date:'Y-m-d' }}&amp;hasta={{ hasta|date:'Y-m-d' }}&amp;formato=csv">{% include "_icono.html" with nombre="descargar" %}CSV</a>
+  <button class="btn" type="button" onclick="window.print()">{% include "_icono.html" with nombre="imprimir" %}Imprimir</button>
+{% endblock %}
+{% block content %}
+<form class="card filtros-mov no-print subir" method="get">
+  <div><label for="k-insumo">Insumo</label>
+    <select id="k-insumo" onchange="if (this.value) location.href = this.value + location.search">{% for i in insumos %}<option value="{% url 'inventario:kardex' i.pk %}"{% if i.pk == insumo.pk %} selected{% endif %}>{{ i.nombre }}</option>{% endfor %}</select></div>
+  <div><label for="k-desde">Desde</label><input id="k-desde" type="date" name="desde" value="{{ desde|date:'Y-m-d' }}" max="{% now 'Y-m-d' %}"></div>
+  <div><label for="k-hasta">Hasta</label><input id="k-hasta" type="date" name="hasta" value="{{ hasta|date:'Y-m-d' }}" max="{% now 'Y-m-d' %}"></div>
+  <div class="filtro-botones"><button class="btn" type="submit">Ver</button>
+    {% for nombre, r in atajos.items %}<a class="btn sm secundario" href="?desde={{ r.0|date:'Y-m-d' }}&amp;hasta={{ r.1|date:'Y-m-d' }}">{{ nombre }}</a>{% endfor %}</div>
+</form>
+
+<section class="grid-auto subir d1" style="--min: 190px; margin: 16px 0">
+  <div class="kpi"><small>Existencia inicial</small><strong>{{ k.inicial|floatformat:"-3" }} {{ insumo.abreviatura }}</strong><span>{{ desde|date:"d/m/Y" }}</span></div>
+  <div class="kpi"><small>Entradas</small><strong class="sube">+{{ k.entradas|floatformat:"-3" }}</strong><span>${{ k.valor_entradas|intcomma }}</span></div>
+  <div class="kpi"><small>Salidas</small><strong class="baja">−{{ k.salidas|floatformat:"-3" }}</strong><span>${{ k.valor_salidas|intcomma }}</span></div>
+  <div class="kpi oscuro"><small>Existencia final</small><strong>{{ k.final|floatformat:"-3" }} {{ insumo.abreviatura }}</strong><span>Valor ${{ k.valor_final|intcomma }}</span></div>
+</section>
+
+{% if cuadra is not None %}
+  <p class="auditoria {% if cuadra and not k.saltos %}ok{% else %}con-diferencias{% endif %}">
+    {% if cuadra and not k.saltos %}{% include "_icono.html" with nombre="check" grosor="2.4" %}El saldo del kárdex coincide con el stock registrado ({{ insumo.stock_actual|floatformat:"-3" }} {{ insumo.abreviatura }}).
+    {% else %}{% include "_icono.html" with nombre="alerta" %}El kárdex termina en {{ k.final|floatformat:"-3" }} y el stock registrado es {{ insumo.stock_actual|floatformat:"-3" }} {{ insumo.abreviatura }}{% if k.saltos %} · {{ k.saltos }} salto{{ k.saltos|pluralize }} en la cadena{% endif %}. Registra un ajuste por conteo para corregirlo.{% endif %}
+  </p>
+{% endif %}
+
+<section class="card subir d2">
+  <div class="tabla-caja">
+    <table class="tabla-mov">
+      <thead><tr><th>Fecha</th><th>Concepto</th><th>Documento</th><th class="der">Entrada</th><th class="der">Salida</th><th class="der">Saldo</th><th class="der">Costo unit.</th><th>Usuario</th></tr></thead>
+      <tbody>
+        <tr class="fila-saldo"><td>{{ desde|date:"d/m/Y" }}</td><td colspan="4" class="fuerte">Existencia inicial</td><td class="der num fuerte">{{ k.inicial|floatformat:"-3" }}</td><td></td><td></td></tr>
+        {% for f in k.filas %}
+          <tr>
+            <td class="num">{{ f.mov.creado_en|date:"d/m/Y H:i" }}</td>
+            <td><span class="pill mov-{{ f.mov.tipo }}">{{ f.mov.get_tipo_display }}</span>{% if f.mov.nota %}<div class="obs">{{ f.mov.nota }}</div>{% endif %}</td>
+            <td>{{ f.mov.documento|default:"—" }}</td>
+            <td class="der num sube">{% if f.entrada %}{{ f.entrada|floatformat:"-3" }}{% endif %}</td>
+            <td class="der num baja">{% if f.salida %}{{ f.salida|floatformat:"-3" }}{% endif %}</td>
+            <td class="der num fuerte">{{ f.saldo|floatformat:"-3" }}</td>
+            <td class="der num">${{ f.mov.costo_unitario|floatformat:4 }}</td>
+            <td>{{ f.mov.usuario.username|default:"Sistema" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="8" class="obs">Sin movimientos en este período.</td></tr>
+        {% endfor %}
+        <tr class="fila-saldo"><td>{{ hasta|date:"d/m/Y" }}</td><td colspan="2" class="fuerte">Totales y existencia final</td>
+          <td class="der num fuerte">{{ k.entradas|floatformat:"-3" }}</td><td class="der num fuerte">{{ k.salidas|floatformat:"-3" }}</td>
+          <td class="der num fuerte">{{ k.final|floatformat:"-3" }}</td><td></td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

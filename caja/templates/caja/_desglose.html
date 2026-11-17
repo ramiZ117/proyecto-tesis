@@ -5,6 +5,18 @@
   <div class="kpi"><small>Divisas en caja</small><strong>${{ datos.divisas_usd|intcomma }}</strong><span>Efectivo en dólares</span></div>
   <div class="kpi"><small>Facturas</small><strong>{{ datos.cantidad_facturas }}</strong><span>Cobradas · {{ datos.facturas_anuladas }} anulada{{ datos.facturas_anuladas|pluralize }}{% if datos.cantidad_devoluciones %} · {{ datos.cantidad_devoluciones }} devolución{{ datos.cantidad_devoluciones|pluralize:"es" }} (Bs {{ datos.devuelto_local|intcomma }}){% endif %}</span></div>
 </div>
+<div class="grid-auto" style="--min: 200px; margin-bottom: 16px">
+  <div class="kpi"><small>Base imponible</small><strong>Bs {{ datos.base_local|intcomma }}</strong><span>Ventas sin IVA</span></div>
+  <div class="kpi"><small>IVA</small><strong>Bs {{ datos.iva_local|intcomma }}</strong><span>Incluido en los precios</span></div>
+  <div class="kpi"><small>IGTF</small><strong>Bs {{ datos.igtf_local|intcomma }}</strong><span>Cobrado aparte en pagos con divisas</span></div>
+</div>
+{% if datos.descuentos_local or datos.propinas %}
+<div class="grid-auto" style="--min: 240px; margin-bottom: 16px">
+  {% if datos.descuentos_local %}<div class="kpi"><small>Descuentos otorgados</small><strong>Bs {{ datos.descuentos_local|intcomma }}</strong><span>Ya restados de las facturas</span></div>{% endif %}
+  {% if datos.propinas %}<div class="kpi"><small>Propinas recibidas</small><strong>Bs {{ datos.propinas_local|intcomma }}</strong>
+    <span>{% for p in datos.propinas %}{{ p.metodo_label }}: {% if p.moneda == "USD" %}${{ p.monto|intcomma }}{% else %}Bs {{ p.monto|intcomma }}{% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}. Son de los meseros, no venta.</span></div>{% endif %}
+</div>
+{% endif %}
 <h3>Cobros por método y moneda</h3>
 <div class="tabla-caja">
   <table>
@@ -30,19 +42,20 @@
 <h3>Facturas del período</h3>
 <div class="tabla-caja">
   <table>
-    <thead><tr><th>Factura</th><th>Mesa</th><th>Cajero</th><th class="der">Total Bs</th><th class="der">Total USD</th><th>Estado</th></tr></thead>
+    <thead><tr><th>Factura</th><th>Mesa</th><th>Mesero</th><th>Cajero</th><th class="der">Total Bs</th><th class="der">Total USD</th><th>Estado</th></tr></thead>
     <tbody>
       {% for f in datos.facturas %}
         <tr>
           <td><a href="{% url 'caja:factura' f.pk %}">{{ f.numero }}</a></td>
           <td>{{ f.mesa }}</td>
+          <td>{{ f.mesero|default:"—" }}</td>
           <td>{{ f.cajero }}</td>
           <td class="der num">{{ f.total_local|intcomma }}</td>
           <td class="der num">{{ f.total_usd|intcomma }}</td>
           <td>{% if f.estado == "ANU" %}<span class="pill crit">Devuelta</span>{% else %}<span class="pill ok">Cobrada</span>{% endif %}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="6" class="obs">Sin facturas cobradas en este período.</td></tr>
+        <tr><td colspan="7" class="obs">Sin facturas cobradas en este período.</td></tr>
       {% endfor %}
     </tbody>
   </table>

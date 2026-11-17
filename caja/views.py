@@ -2,6 +2,7 @@ import csv
 from datetime import datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -13,10 +14,11 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
-from caja.models import CierreCaja, Factura, Pago, TasaCambio
+from caja.correo import enviar_en_segundo_plano, enviar_factura
+from caja.models import CierreCaja, Factura, Pago, Propina, SolicitudCuenta, TasaCambio, datos_cliente_validos
 from config.formato import num
-from config.permisos import GRUPO_CAJA, es_admin, requiere_grupo, texto_validacion
-from mesas.models import DetallePedido, Mesa, Pedido
+from config.permisos import GRUPO_CAJA, GRUPO_MESERO, en_grupo, es_admin, requiere_grupo, texto_validacion
+from mesas.models import DetallePedido, Mesa, Pedido, PedidoEnLinea
 
 CENTAVO = Decimal("0.01")
 
@@ -48,6 +50,7 @@ def _cuentas_abiertas(tasa):
     """Comandas abiertas (mesas y para llevar) con su consumo; las que piden cuenta van primero."""
     pedidos = (
         Pedido.objects.exclude(estado__in=[Pedido.Estado.CERRADO, Pedido.Estado.ANULADO])
+        .exclude(en_linea=True)  # los pedidos en línea ya vienen pagados: tienen su propia pantalla
         .select_related("mesa", "mesero")
         .prefetch_related(
             Prefetch(
@@ -56,6 +59,8 @@ def _cuentas_abiertas(tasa):
                 to_attr="items_cuenta",
             ),
             Prefetch("facturas", queryset=Factura.objects.exclude(estado=Factura.Estado.ANULADA), to_attr="facturas_vigentes"),
+            Prefetch("solicitudes_cuenta", queryset=SolicitudCuenta.objects.filter(estado__in=SolicitudCuenta.ACTIVAS),
+                     to_attr="cuenta_cliente"),
         )
     )
     cuentas_abiertas = []
@@ -75,10 +80,12 @@ def _cuentas_abiertas(tasa):
                 "factura": pedido.facturas_vigentes[0] if pedido.facturas_vigentes else None,
                 "solicitada": solicitada,
                 "sin_enviar": any(not d.enviado for d in pedido.items_cuenta),
+                "cuenta_cliente": pedido.cuenta_cliente[0] if pedido.cuenta_cliente else None,
             }
         )
     cuentas_abiertas.sort(
-        key=lambda c: (not c["solicitada"], c["pedido"].mesa is None, c["pedido"].mesa.numero if c["pedido"].mesa else c["pedido"].pk)
+        key=lambda c: (not (c["cuenta_cliente"] and c["cuenta_cliente"].estado == SolicitudCuenta.Estado.REPORTADA),
+                       not c["solicitada"], c["pedido"].mesa is None, c["pedido"].mesa.numero if c["pedido"].mesa else c["pedido"].pk)
     )
     return cuentas_abiertas
 
@@ -106,14 +113,21 @@ def emitir_factura(request, pedido_id):
 @requiere_grupo(GRUPO_CAJA)
 def factura_detalle(request, factura_id):
     factura = get_object_or_404(
-        Factura.objects.select_related("pedido__mesa", "cajero").prefetch_related(
+        Factura.objects.select_related("pedido__mesa", "pedido__mesero", "cajero", "descuento_por").prefetch_related(
             "pagos",
             "pedido__detalles__producto",
         ),
         pk=factura_id,
     )
     saldo = factura.saldo_local
-    contexto = {"factura": factura, "saldo": saldo, "saldo_usd": factura.saldo_usd}
+    factor_igtf = 1 + settings.IGTF_PORCENTAJE / 100
+    contexto = {
+        "factura": factura, "saldo": saldo, "saldo_usd": factura.saldo_usd,
+        "saldo_usd_igtf": (saldo * factor_igtf / factura.tasa_cambio).quantize(CENTAVO, rounding=ROUND_HALF_UP),
+        "igtf_porcentaje": settings.IGTF_PORCENTAJE, "igtf_metodos": ",".join(settings.IGTF_METODOS),
+        "local_nombre": settings.RESTAURANTE_NOMBRE, "local_rif": settings.RESTAURANTE_RIF,
+        "local_direccion": settings.RESTAURANTE_DIRECCION,
+    }
     try:
         partes = int(request.GET.get("partes", "0"))
     except ValueError:
@@ -147,36 +161,139 @@ def factura_detalle(request, factura_id):
     contexto["metodos"] = [
         (Pago.Metodo.EFECTIVO, "Efectivo", "Bolívares, con vuelto"),
         (Pago.Metodo.PAGO_MOVIL, "Pago móvil", "Bolívares, con referencia"),
-        (Pago.Metodo.DIVISA, "Divisa", "Dólares en efectivo"),
+        (Pago.Metodo.DIVISA, "Divisa", f"Dólares en efectivo + {settings.IGTF_PORCENTAJE:g} % IGTF"),
         (Pago.Metodo.TARJETA, "Tarjeta", "Punto de venta"),
+        (Pago.Metodo.BINANCE, "Binance", "Dólares, con referencia"),
+        (Pago.Metodo.ZINLI, "Zinli", "Dólares, con referencia"),
     ]
+    contexto["cuenta_cliente"] = SolicitudCuenta.activa_de(factura.pedido)
     contexto["detalles_vigentes"] = [d for d in factura.pedido.detalles.all() if d.estado != DetallePedido.Estado.ANULADO]
+    contexto["propinas"] = list(factura.propinas.all())
     return render(request, "caja/factura.html", contexto)
 
 
 @requiere_grupo(GRUPO_CAJA)
 @require_POST
 def registrar_pago(request, factura_id):
+    """Cobro simple o mixto (varias líneas método/monto/referencia) y, si la hay, la propina."""
     factura = get_object_or_404(Factura, pk=factura_id)
-    monto = _leer_monto(request.POST.get("monto_recibido"))
-    if monto is None:
-        messages.error(request, "Ingresa un monto válido.")
+    metodos = request.POST.getlist("metodo") or [Pago.Metodo.EFECTIVO]
+    montos = request.POST.getlist("monto_recibido")
+    referencias = request.POST.getlist("referencia")
+    pagos = []
+    for n, metodo in enumerate(metodos):
+        texto = montos[n] if n < len(montos) else ""
+        if not (texto or "").strip() and n > 0:
+            continue  # fila adicional vacía: se ignora
+        monto = _leer_monto(texto)
+        if monto is None:
+            messages.error(request, "Ingresa un monto válido." if len(metodos) == 1 else f"El monto del pago {n + 1} no es válido.")
+            return redirect("caja:factura", factura_id=factura.pk)
+        pagos.append({"metodo": metodo, "monto": monto, "referencia": (referencias[n] if n < len(referencias) else "").strip()[:60]})
+
+    propina_texto = (request.POST.get("propina_monto") or "").strip()
+    propina = _leer_monto(propina_texto) if propina_texto else None
+    if propina_texto and propina is None:
+        messages.error(request, "La propina debe ser un monto mayor a cero.")
         return redirect("caja:factura", factura_id=factura.pk)
     try:
-        _, factura = factura.cobrar(
-            metodo=request.POST.get("metodo") or Pago.Metodo.EFECTIVO,
-            monto=monto,
-            referencia=request.POST.get("referencia", "").strip()[:60],
-            pagador=request.POST.get("pagador", "").strip()[:80],
-        )
+        with transaction.atomic():
+            if len(pagos) == 1:
+                _, factura = factura.cobrar(
+                    metodo=pagos[0]["metodo"], monto=pagos[0]["monto"], referencia=pagos[0]["referencia"],
+                    pagador=request.POST.get("pagador", "").strip()[:80],
+                )
+            else:
+                _, factura = factura.cobrar_mixto(pagos, pagador=request.POST.get("pagador", "").strip()[:80])
+            if propina:
+                Propina.registrar(factura, metodo=request.POST.get("propina_metodo") or Pago.Metodo.EFECTIVO,
+                                  monto=propina, usuario=request.user)
     except ValidationError as exc:
         messages.error(request, texto_validacion(exc))
         return redirect("caja:factura", factura_id=factura.pk)
+    extra = " Propina registrada a favor del mesero." if propina else ""
     if factura.estado == Factura.Estado.PAGADA:
-        messages.success(request, "Pago registrado. Cuenta cerrada y mesa por limpiar.")
+        messages.success(request, "Pago registrado. Cuenta cerrada y mesa por limpiar." + extra
+                         + (f" Enviando la factura a {factura.cliente_correo}." if factura.cliente_correo else ""))
+        enviar_en_segundo_plano(factura)
     else:
-        messages.success(request, f"Pago registrado. Saldo pendiente: Bs. {factura.saldo_local}.")
+        messages.success(request, f"Pago registrado. Saldo pendiente: Bs. {factura.saldo_local}." + extra)
     return redirect("caja:factura", factura_id=factura.pk)
+
+
+@requiere_grupo(GRUPO_CAJA)
+@require_POST
+def registrar_propina(request, factura_id):
+    """Propina que llega aparte del cobro (por ejemplo, cuando el cliente ya pagó)."""
+    factura = get_object_or_404(Factura.objects.select_related("pedido"), pk=factura_id)
+    monto = _leer_monto(request.POST.get("propina_monto"))
+    if monto is None:
+        messages.error(request, "La propina debe ser un monto mayor a cero.")
+        return redirect("caja:factura", factura_id=factura.pk)
+    try:
+        propina = Propina.registrar(factura, metodo=request.POST.get("propina_metodo") or Pago.Metodo.EFECTIVO,
+                                    monto=monto, usuario=request.user)
+        messages.success(request, f"Propina registrada a favor de {propina.mesero.username}.")
+    except ValidationError as exc:
+        messages.error(request, texto_validacion(exc))
+    return redirect("caja:factura", factura_id=factura.pk)
+
+
+@requiere_grupo(GRUPO_CAJA)
+@require_POST
+def descuento(request, factura_id):
+    factura = get_object_or_404(Factura, pk=factura_id)
+    try:
+        if request.POST.get("quitar"):
+            factura.quitar_descuento()
+            messages.success(request, "Descuento quitado.")
+        else:
+            valor = _leer_monto(request.POST.get("valor"))
+            aplicado = factura.aplicar_descuento(
+                tipo=request.POST.get("tipo", ""), valor=valor, motivo=request.POST.get("motivo", ""), usuario=request.user
+            )
+            messages.success(request, f"Descuento de Bs {num(aplicado, 2)} aplicado.")
+    except ValidationError as exc:
+        messages.error(request, texto_validacion(exc))
+    return redirect("caja:factura", factura_id=factura.pk)
+
+
+@requiere_grupo(GRUPO_CAJA, GRUPO_MESERO)
+def propinas(request):
+    """Saldo a favor de cada mesero por propinas no entregadas, y el historial reciente.
+
+    La caja ve a todos y marca las entregas; el mesero ve solo las suyas ("Mis propinas").
+    """
+    from django.contrib.auth.models import User
+    from django.db.models import Count, Sum
+
+    es_caja = en_grupo(request.user, GRUPO_CAJA)
+    base = Propina.objects.all() if es_caja else Propina.objects.filter(mesero=request.user)
+    pendientes = (
+        base.filter(pagada=False).values("mesero").annotate(
+            total_local=Sum("monto_local"), total_usd=Sum("monto_usd"), cantidad=Count("id")
+        )
+    )
+    usuarios = User.objects.in_bulk([fila["mesero"] for fila in pendientes])
+    saldos = sorted(
+        ({**f, "mesero": usuarios[f["mesero"]]} for f in pendientes), key=lambda f: f["mesero"].username
+    )
+    recientes = base.select_related("mesero", "factura__pedido__mesa", "pagada_por")[:40]
+    return render(request, "caja/propinas.html", {"saldos": saldos, "recientes": recientes, "es_caja": es_caja})
+
+
+@requiere_grupo(GRUPO_CAJA)
+@require_POST
+def pagar_propinas(request, mesero_id):
+    """El negocio le entrega al mesero sus propinas pendientes: quedan marcadas como pagadas."""
+    pendientes = list(Propina.objects.filter(mesero_id=mesero_id, pagada=False))
+    if not pendientes:
+        messages.error(request, "Ese mesero no tiene propinas pendientes.")
+        return redirect("caja:propinas")
+    total = sum((p.monto_local for p in pendientes), Decimal("0"))
+    Propina.marcar_pagadas(pendientes, request.user)
+    messages.success(request, f"Propinas de {pendientes[0].mesero.username} marcadas como pagadas (Bs {num(total, 2)}).")
+    return redirect("caja:propinas")
 
 
 @requiere_grupo(GRUPO_CAJA)
@@ -241,6 +358,17 @@ def tasa_cambio(request):
     tasas = TasaCambio.objects.select_related("creada_por")[:20]
     propuesta = _leer_monto(request.GET.get("confirmar"), decimales=4)
     return render(request, "caja/tasa.html", {"tasas": tasas, "vigente": _tasa_activa(), "propuesta": propuesta})
+
+
+@requiere_grupo(GRUPO_CAJA)
+@require_POST
+def tasa_bcv(request):
+    """Consulta ya la tasa oficial del BCV (además de la revisión automática)."""
+    from caja.tasa_bcv import actualizar
+
+    resultado = actualizar(forzar=bool(request.POST.get("forzar")) and es_admin(request.user))
+    (messages.success if resultado.actualizada else messages.warning)(request, resultado.mensaje)
+    return redirect("caja:tasa")
 
 
 @requiere_grupo(GRUPO_CAJA)
@@ -379,3 +507,160 @@ def _respuesta_csv(nombre: str, titulo: str, datos: dict) -> HttpResponse:
              "Devuelta" if f["estado"] == Factura.Estado.ANULADA else "Cobrada"]
         )
     return respuesta
+
+
+@requiere_grupo(GRUPO_CAJA)
+@require_POST
+def revisar_pago_cliente(request, factura_id):
+    """Caja confirma (o no) el pago móvil, Binance o Zinli que el cliente reportó desde su mesa."""
+    factura = get_object_or_404(Factura.objects.select_related("pedido__mesero"), pk=factura_id)
+    solicitud = SolicitudCuenta.activa_de(factura.pedido)
+    if solicitud is None:
+        messages.error(request, "Esta cuenta no tiene un pago reportado por el cliente.")
+        return redirect("caja:factura", factura_id=factura.pk)
+    try:
+        if request.POST.get("accion") == "rechazar":
+            solicitud.rechazar(request.user)
+            messages.warning(request, "Pago marcado como no recibido. El cliente verá el aviso en su teléfono.")
+        else:
+            with transaction.atomic():
+                solicitud.confirmar(factura, request.user)
+            factura.refresh_from_db()
+            extra = f" Propina de {solicitud.get_metodo_display()} a favor de {factura.pedido.mesero.username}." if solicitud.propina else ""
+            if factura.estado == Factura.Estado.PAGADA:
+                messages.success(request, "Pago del cliente confirmado. Cuenta cerrada y mesa por limpiar." + extra)
+                enviar_en_segundo_plano(factura)
+            else:
+                messages.success(request, f"Pago confirmado. Queda un saldo de Bs. {factura.saldo_local}." + extra)
+    except ValidationError as exc:
+        messages.error(request, texto_validacion(exc) + " Puedes registrarlo a mano en «Registrar pago».")
+    return redirect("caja:factura", factura_id=factura.pk)
+
+
+@requiere_grupo(GRUPO_CAJA)
+@require_POST
+def datos_cliente(request, factura_id):
+    """Factura personalizada (nombre, cédula/RIF, dirección, teléfono, correo) o consumidor final."""
+    factura = get_object_or_404(Factura, pk=factura_id)
+    if factura.estado == Factura.Estado.ANULADA:
+        messages.error(request, "La factura está anulada.")
+        return redirect("caja:factura", factura_id=factura.pk)
+    if request.POST.get("tipo") == "generica":
+        factura.guardar_datos_cliente(None)
+        messages.success(request, "Factura a consumidor final (sin datos del cliente).")
+        return redirect("caja:factura", factura_id=factura.pk)
+    datos, error = datos_cliente_validos(request.POST)
+    if error:
+        messages.error(request, error)
+        return redirect(reverse("caja:factura", args=[factura.pk]) + "#datos-cliente")
+    factura.guardar_datos_cliente(datos)
+    messages.success(request, f"Factura a nombre de {datos['nombre']}.")
+    return redirect("caja:factura", factura_id=factura.pk)
+
+
+@requiere_grupo(GRUPO_CAJA)
+@require_POST
+def enviar_correo(request, factura_id):
+    factura = get_object_or_404(Factura, pk=factura_id)
+    correo = (request.POST.get("correo") or "").strip()
+    if correo and correo != factura.cliente_correo:
+        from django.core.validators import validate_email
+
+        try:
+            validate_email(correo)
+        except ValidationError:
+            messages.error(request, "El correo no es válido.")
+            return redirect("caja:factura", factura_id=factura.pk)
+        factura.cliente_correo = correo[:254]
+        factura.save(update_fields=["cliente_correo"])
+    enviado, texto = enviar_factura(factura)
+    (messages.success if enviado else messages.error)(request, texto)
+    return redirect("caja:factura", factura_id=factura.pk)
+
+
+# ---- pedidos en línea para retirar ---------------------------------------------------------
+def _pedidos_en_linea():
+    activos = list(
+        PedidoEnLinea.objects.filter(estado__in=[PedidoEnLinea.Estado.POR_VERIFICAR, PedidoEnLinea.Estado.ACEPTADO])
+        .select_related("pedido", "revisado_por").order_by("creado_en")
+    )
+    grupos = {"verificar": [], "cocina": [], "listo": []}
+    for p in activos:
+        grupos.setdefault(p.etapa, []).append(p)
+    recientes = list(PedidoEnLinea.objects.filter(estado__in=[PedidoEnLinea.Estado.ENTREGADO, PedidoEnLinea.Estado.RECHAZADO])
+                     .order_by("-revisado_en", "-creado_en")[:10])
+    return {**grupos, "recientes": recientes}
+
+
+def _enlace_whatsapp(pedido_web) -> str:
+    from urllib.parse import quote
+
+    digitos = "".join(c for c in pedido_web.cliente_telefono if c.isdigit())
+    if digitos.startswith("0"):
+        digitos = "58" + digitos[1:]
+    texto = (f"¡Hola {pedido_web.cliente_nombre}! Tu pedido {pedido_web.codigo} de {settings.RESTAURANTE_NOMBRE} "
+             "está listo para retirar. ¡Te esperamos!")
+    return f"https://wa.me/{digitos}?text={quote(texto)}"
+
+
+@requiere_grupo(GRUPO_CAJA)
+def en_linea(request):
+    contexto = _pedidos_en_linea()
+    for p in contexto["listo"]:
+        p.whatsapp = _enlace_whatsapp(p)
+    return render(request, "caja/en_linea.html", contexto)
+
+
+@requiere_grupo(GRUPO_CAJA)
+def en_linea_parcial(request):
+    contexto = _pedidos_en_linea()
+    for p in contexto["listo"]:
+        p.whatsapp = _enlace_whatsapp(p)
+    return render(request, "caja/_en_linea_grid.html", contexto)
+
+
+@requiere_grupo(GRUPO_CAJA)
+def comprobante(request, pedido_id):
+    """El comprobante solo lo ve caja (no está en /media/)."""
+    from django.http import FileResponse, Http404
+
+    pedido_web = get_object_or_404(PedidoEnLinea, pk=pedido_id)
+    if not pedido_web.comprobante:
+        raise Http404
+    try:
+        archivo = pedido_web.comprobante.open("rb")
+    except FileNotFoundError as exc:
+        raise Http404 from exc
+    nombre = pedido_web.comprobante.name.lower()
+    tipo = "application/pdf" if nombre.endswith(".pdf") else "image/jpeg"
+    respuesta = FileResponse(archivo, content_type=tipo)
+    respuesta["Content-Disposition"] = "inline"
+    respuesta["X-Content-Type-Options"] = "nosniff"
+    respuesta["Cache-Control"] = "private, no-store"
+    return respuesta
+
+
+@requiere_grupo(GRUPO_CAJA)
+@require_POST
+def en_linea_accion(request, pedido_id):
+    pedido_web = get_object_or_404(PedidoEnLinea, pk=pedido_id)
+    accion = request.POST.get("accion")
+    try:
+        if accion == "aceptar":
+            factura = pedido_web.aceptar(request.user)
+            messages.success(request, f"Pago de {pedido_web.codigo} verificado: el pedido ya está en cocina (factura {factura.numero}).")
+            enviar_en_segundo_plano(factura)
+        elif accion == "rechazar":
+            pedido_web.rechazar(request.user, request.POST.get("motivo", ""))
+            messages.warning(request, f"Pedido {pedido_web.codigo} rechazado. El cliente verá el motivo.")
+        elif accion == "avisado":
+            PedidoEnLinea.objects.filter(pk=pedido_web.pk).update(avisado_en=timezone.now())
+            messages.success(request, f"Marcado: ya le avisaste a {pedido_web.cliente_nombre}.")
+        elif accion == "entregar":
+            pedido_web.entregar()
+            messages.success(request, f"Pedido {pedido_web.codigo} entregado a {pedido_web.cliente_nombre}.")
+        else:
+            messages.error(request, "Acción no válida.")
+    except ValidationError as exc:
+        messages.error(request, texto_validacion(exc))
+    return redirect("caja:en_linea")

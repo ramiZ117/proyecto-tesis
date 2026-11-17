@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Insumos{% endblock %}
+{% block subtitle %}Ficha de cada insumo: unidad, proveedor, costo y niveles. El stock se mueve desde Inventario.{% endblock %}
+{% block heading %}Insumos{% endblock %}
+{% block top_actions %}
+  <div class="campo-icono" style="min-width: 220px">
+    {% include "_icono.html" with nombre="buscar" %}
+    <label class="oculto" for="buscar-insumo">Buscar insumo</label>
+    <input id="buscar-insumo" type="search" placeholder="Buscar insumo o proveedor" data-filtro-texto="insumos-admin" autocomplete="off">
+  </div>
+  <a class="btn secundario" href="{% url 'inventario:stock' %}">Ir a Inventario</a>
+  <a class="btn" href="{% url 'gestion:insumo_nuevo' %}">{% include "_icono.html" with nombre="mas" grosor="2.4" %}Nuevo insumo</a>
+{% endblock %}
+{% block content %}
+<section class="card subir">
+  <div class="tabla-caja">
+    <table style="min-width: 720px">
+      <thead><tr><th>Insumo</th><th>Grupo</th><th>Proveedor</th><th class="der">Stock</th><th class="der">Mín · Repos. · Máx</th><th class="der">Costo</th><th></th></tr></thead>
+      <tbody>
+        {% for i in insumos %}
+          <tr data-filtrable="insumos-admin" data-texto="{{ i.nombre }} {{ i.proveedor.nombre|default:'' }} {{ i.get_grupo_display }}"{% if not i.activo %} style="opacity:.55"{% endif %}>
+            <td><strong>{{ i.nombre }}</strong>{% if not i.activo %} <span class="pill gris">Inactivo</span>{% endif %}</td>
+            <td>{{ i.get_grupo_display }}</td>
+            <td>{{ i.proveedor.nombre|default:"—" }}</td>
+            <td class="der num">{{ i.stock_actual|floatformat:"-3" }} {{ i.abreviatura }}</td>
+            <td class="der num obs">{{ i.stock_minimo|floatformat:"-3" }} · {{ i.punto_reposicion|floatformat:"-3" }} · {{ i.stock_maximo|floatformat:"-3" }}</td>
+            <td class="der num">${{ i.costo_unitario|floatformat:2 }}</td>
+            <td class="der"><a class="btn sm secundario" href="{% url 'inventario:kardex' i.pk %}">Kárdex</a> <a class="btn sm secundario" href="{% url 'gestion:insumo' i.pk %}">{% include "_icono.html" with nombre="editar" %}Editar</a></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" class="obs">Todavía no hay insumos.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <nav class="paginador" data-paginar="insumos-admin" data-por-pagina="15" aria-label="Páginas de insumos"></nav>
+  </div>
+</section>
+{% endblock %}

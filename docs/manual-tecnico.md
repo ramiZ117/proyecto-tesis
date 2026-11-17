@@ -18,6 +18,8 @@ Guía para instalar, operar y mantener el sistema. Complementa el capítulo IV d
 | `cocina` | Monitor de cocina (sin tablas propias) | proxies `PedidoKDS`, `PlatilloKDS` |
 | `caja` | Tasa, facturas, pagos, devoluciones, cuenta dividida, cierres | `TasaCambio`, `Factura`, `Pago`, `Devolucion`, `Asignacion`, `CierreCaja` |
 | `inventario` | Carta, recetas, insumos, proveedores, movimientos | `Categoria`, `Producto`, `Receta`, `Insumo`, `Proveedor`, `MovimientoStock` |
+| `gestion` | Administración: carta con fotos, insumos, proveedores, mesas y QR | (usa los modelos de `inventario` y `mesas`) |
+| `menu` | Menú digital público y asistente de IA | (solo lectura de la carta) |
 
 Las reglas de negocio viven en los modelos y en `inventario/servicios.py`; las vistas solo
 autorizan, leen el formulario y muestran el resultado.
@@ -40,9 +42,16 @@ operaciones simultáneas (dos cajeros, dos meseros en la misma mesa) se atienden
 `WAL` permite que las lecturas (mapa, cocina, reportes) no esperen a las escrituras. La prueba
 `medir_rendimiento` lo verifica con usuarios simultáneos (ver `docs/resultados-rendimiento.md`).
 
-**Panel técnico (`/admin/`).** Facturas, pagos, devoluciones, cierres, comandas, tasas y
-movimientos de stock son de solo lectura: solo cambian a través de los métodos que aplican las
-reglas. La carta, los insumos, los proveedores, las categorías y las mesas sí se editan ahí.
+**Sin panel técnico.** El panel genérico de Django (`/admin/`) fue retirado: todo se administra en
+las pantallas propias del módulo `gestion`. Facturas, pagos, devoluciones, cierres, comandas y
+movimientos de stock no tienen pantalla de edición: solo cambian a través de los métodos que
+aplican las reglas. El stock de un insumo tampoco se edita en su ficha; se mueve con entradas,
+mermas o ajustes por conteo, que quedan registrados.
+
+**Validaciones de la administración.** Fotos: imagen real (JPG, PNG o WEBP), hasta 6 MB y al menos
+300 px; se reducen a 1400 px y se guardan como JPEG sin metadatos. Precio no negativo, plato sin
+nombre repetido en su categoría, receta sin insumos repetidos, niveles mínimo ≤ reposición ≤ máximo,
+mesa con número único, sin dos mesas en la misma posición, y retiro de mesas solo si están libres.
 
 ## 3. Variables de configuración (`.env`)
 
@@ -57,6 +66,13 @@ reglas. La carta, los insumos, los proveedores, las categorías y las mesas sí 
 | `RESPALDOS_DIR` | otro disco o USB | Carpeta de respaldos (por defecto `respaldos/`) |
 | `RESPALDOS_CONSERVAR` | `30` | Cuántos respaldos guardar |
 | `KDS_MINUTOS_ALERTA` / `KDS_MINUTOS_CRITICO` | `15` / `25` | Umbrales del monitor de cocina |
+| `MENU_URL_PUBLICA` | `http://192.168.1.10:8000` | Dirección que codifican los QR del menú |
+| `MEDIA_DIR` | opcional | Carpeta de las fotos de los platos (por defecto `media/`) |
+| `RESTAURANTE_TELEFONO`, `RESTAURANTE_INSTAGRAM`, `RESTAURANTE_DIRECCION`, `RESTAURANTE_WHATSAPP` | datos del local | Botones de contacto del menú (WhatsApp vacío oculta su botón) |
+| `IA_PROVEEDOR` | `gemini`, `groq`, `xai` o vacío | Vacío: el primero con clave; sin claves, asistente local |
+| `GEMINI_API_KEY` / `GROQ_API_KEY` / `XAI_API_KEY` | clave del proveedor | Gemini (aistudio.google.com) y Groq (console.groq.com) tienen nivel gratuito |
+| `GEMINI_MODELO` / `GROQ_MODELO` / `XAI_MODELO` | por defecto `gemini-flash-lite-latest,gemini-flash-latest`, `llama-3.3-70b-versatile`, `grok-3-mini` | Admiten varios separados por coma: si uno no existe o está saturado (503, frecuente en el plan gratuito) se prueba el siguiente |
+| `IA_MENSAJES_POR_HORA` | `30` | Preguntas por hora y por conexión |
 
 `manage.py check --deploy` muestra 4 avisos sobre HTTPS mientras `DJANGO_HTTPS=0`. Son esperables en
 una red interna por HTTP y desaparecen al activar HTTPS con certificado.
@@ -120,16 +136,33 @@ sudo systemctl enable --now elamir
 ( crontab -l; echo "30 23 * * * /opt/elamir/venv/bin/python /opt/elamir/manage.py respaldar" ) | crontab -
 ```
 
-## 5. Respaldos y restauración
+## 5. Menú digital y asistente
+
+- Página pública en `/menu/` (y `/menu/?mesa=3` desde el QR de cada mesa). No requiere sesión y solo
+  lee la carta: no crea pedidos ni modifica datos.
+- **Alcance de red:** dentro del local, los teléfonos deben estar en la Wi-Fi del restaurante y
+  `MENU_URL_PUBLICA` debe usar la IP del servidor. Para abrirlo desde fuera, el servidor tiene que
+  publicarse en internet (dominio o túnel), lo que queda fuera del alcance actual.
+- **Asistente:** `menu/asistente.py`. Envía al proveedor la pregunta, los últimos turnos de la
+  conversación y la carta (platos, precios, ingredientes, etiquetas y disponibilidad); no envía
+  datos de clientes ni de ventas. Las instrucciones le prohíben inventar platos o precios y le
+  piden derivar las alergias al personal. Si el proveedor no responde en 20 s o falla, contesta
+  el asistente local. Límite de preguntas por hora y por IP, máximo 400 caracteres, token CSRF
+  obligatorio; las respuestas se insertan como texto, nunca como HTML.
+- **Fotos de ejemplo:** `inventario/fotos_semilla/` (Wikimedia Commons, licencias libres con autor en
+  `creditos.json`). `seed_restaurante` solo las asigna a platos que no tienen foto propia.
+
+## 6. Respaldos y restauración
 
 - `python manage.py respaldar` crea `respaldos/el_amir_AAAA-MM-DD_HHMMSS.sqlite3` con la API de
-  respaldo de SQLite (copia consistente aunque el sistema esté en uso), verifica su integridad y
-  conserva las 30 más recientes.
+  respaldo de SQLite (copia consistente aunque el sistema esté en uso), verifica su integridad,
+  guarda las fotos de los platos en `..._fotos.zip` y conserva los 30 respaldos más recientes.
 - Conviene que `RESPALDOS_DIR` apunte a otro disco o a una memoria USB, y copiar alguno fuera del local.
 - **Restaurar:** detener el servidor, copiar el respaldo elegido como `db.sqlite3` (borrar
-  `db.sqlite3-wal` y `db.sqlite3-shm` si existen) y volver a arrancar.
+  `db.sqlite3-wal` y `db.sqlite3-shm` si existen), descomprimir el `_fotos.zip` en `media/` y
+  volver a arrancar.
 
-## 6. Actualizar a una versión nueva
+## 7. Actualizar a una versión nueva
 
 ```bash
 python manage.py respaldar
@@ -143,10 +176,10 @@ python manage.py collectstatic --noinput
 Las migraciones que agregan columnas completan los datos existentes (por ejemplo, numeran los
 cierres o calculan el punto de reposición de los insumos).
 
-## 7. Pruebas
+## 8. Pruebas
 
 ```bash
-python manage.py test                        # 190 pruebas, ~25 s
+python manage.py test                        # 210 pruebas, ~40 s
 pip install -r requirements-dev.txt          # opcional: pruebas en navegador (Edge/Chrome)
 python manage.py medir_rendimiento --usuarios 8 --rondas 6 --salida docs/resultados-rendimiento.md
 ```
@@ -158,10 +191,11 @@ python manage.py medir_rendimiento --usuarios 8 --rondas 6 --salida docs/resulta
 | `config/test_flujo_completo.py` | Ciclo completo de una mesa |
 | `config/test_integridad.py` | Concurrencia, restricciones, admin de solo lectura |
 | `config/test_fase2.py` | Para llevar, inventario ampliado, cocina por estación, panel y validaciones |
-| `config/test_operacion.py` | Respaldos y configuración de producción |
+| `config/test_operacion.py` | Respaldos (base y fotos) y configuración de producción |
+| `config/test_menu_y_gestion.py` | Administración, menú digital, asistente y contacto del local |
 | `config/test_navegador.py` | Interfaz real en el navegador (JavaScript) |
 
-## 8. Registros y solución de problemas
+## 9. Registros y solución de problemas
 
 - Los errores se guardan en `logs/el_amir.log` (rotativo, 5 archivos de 2 MB).
 
@@ -173,4 +207,7 @@ python manage.py medir_rendimiento --usuarios 8 --rondas 6 --salida docs/resulta
 | La página se ve sin estilos | Ejecuta `collectstatic --noinput` y reinicia |
 | Los meseros no pueden cargar platos | No hay tasa vigente: caja debe publicarla |
 | Un plato aparece "Agotado" | El stock disponible de algún insumo de su receta no alcanza |
+| Los QR abren otra dirección o no cargan | Revisa `MENU_URL_PUBLICA` y que el teléfono esté en la Wi-Fi del local |
+| El asistente dice «Te explico la carta» y no usa IA | No hay clave de IA o el proveedor falló; revisa `logs/el_amir.log` |
+| No se ven las fotos | La carpeta `media/` no existe en el servidor: restáurala desde el `_fotos.zip` |
 | Bloqueo de inicio de sesión | Tras 5 intentos fallidos; se libera solo a los 5 minutos |
