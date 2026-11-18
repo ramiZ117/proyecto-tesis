@@ -42,8 +42,6 @@ class PagosEnDolaresDigitalesTests(_Base):
     def test_binance_es_en_dolares_con_referencia_y_sin_vuelto(self):
         f = Factura.emitir_desde_pedido(self.mesa_servida(), self.cajero)  # Bs 440 = $11
         with self.assertRaises(Exception):
-            f.cobrar(metodo=Pago.Metodo.BINANCE, monto=Decimal("11"))  # sin referencia
-        with self.assertRaises(Exception):
             f.cobrar(metodo=Pago.Metodo.BINANCE, monto=Decimal("12"), referencia="ABC123")  # no da vuelto
         pago, f = f.cobrar(metodo=Pago.Metodo.ZINLI, monto=Decimal("11"), referencia="ZX9988")
         self.assertEqual((pago.moneda, pago.monto_local, pago.vuelto_local), ("USD", Decimal("440.00"), Decimal("0.00")))
@@ -86,14 +84,26 @@ class AjustesTests(_Base):
 
 
 class CuentaDesdeLaMesaTests(_Base):
-    def test_el_boton_aparece_cuando_se_entrega_la_comida(self):
-        pedido = self.mesa_servida(entregar=False)
-        self.assertFalse(self.estado()["cuenta"]["disponible"])
+    def test_se_puede_pedir_la_cuenta_con_platos_en_cocina_y_se_avisa_cuanto_falta(self):
+        from mesas.models import Pedido
+
+        sin_enviar = Pedido.objects.create(mesa=self.mesa2, mesero=self.mesero)
+        self.mesa2.ocupar()
+        DetallePedido.objects.create(pedido=sin_enviar, producto=self.agua, cantidad=1, precio_unitario=Decimal("40"))
+        self.assertFalse(self.estado()["cuenta"]["disponible"])  # nada en cocina todavía
         self.assertEqual(self.post("/menu/cuenta/", metodo="EFE").status_code, 409)
-        pedido.detalles.filter(producto=self.agua).update(estado=DetallePedido.Estado.ENTREGADO)
+        sin_enviar.enviar_a_cocina()
         cuenta = self.estado()["cuenta"]
         self.assertTrue(cuenta["disponible"])
-        self.assertEqual(cuenta["total_bs"], "440,00")
+        self.assertEqual((cuenta["pendientes"], cuenta["total_bs"]), (1, "40,00"))
+        self.assertIsNotNone(cuenta["pendientes_min"])
+        r = self.post("/menu/cuenta/", metodo="TAR", para_llevar=True)
+        self.assertEqual(r.status_code, 200)
+        sin_enviar.refresh_from_db()
+        self.assertIn("Lo pendiente, para llevar", sin_enviar.notas)
+        self.assertContains(self.cliente(self.chef).get("/cocina/"), "Lo pendiente, para llevar")
+        sin_enviar.detalles.update(estado=DetallePedido.Estado.ENTREGADO)
+        self.assertEqual(self.estado()["cuenta"]["pendientes"], 0)
 
     def test_pago_en_caja_con_tarjeta(self):
         self.mesa_servida()

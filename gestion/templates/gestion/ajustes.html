@@ -32,7 +32,11 @@
     </section>
     <section class="card subir d2 pila" style="gap: 4px">
       <h2 style="margin:0">Delivery por apps</h2>
-      <p class="obs" style="margin:0 0 6px">El menú muestra, solo como información, que el local también recibe pedidos a domicilio por PedidosYa y Yummy.</p>
+      <p class="obs" style="margin:0 0 6px">Al final del menú aparecen los botones de PedidosYa y Yummy. Si pegas el enlace de la tienda del local, el botón la abre en la app o en una pestaña nueva; si no, queda como información.</p>
+      <div class="grid-auto" style="--min: 260px; gap: 0 16px">
+        {% include "gestion/_campo.html" with campo=form.pedidosya_url %}
+        {% include "gestion/_campo.html" with campo=form.yummy_url %}
+      </div>
       <div class="interruptores">{% include "gestion/_campo.html" with campo=form.mostrar_delivery %}</div>
     </section>
     <div class="stack"><button class="btn grande" type="submit">Guardar</button></div>

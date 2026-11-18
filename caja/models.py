@@ -562,9 +562,8 @@ class Pago(models.Model):
             raise ValidationError("Ingresa un monto mayor a cero.")
         if self.factura.saldo_local <= 0:
             raise ValidationError("La factura no tiene saldo pendiente.")
+        # La referencia o el voucher se guardan si se escriben, pero no son obligatorios.
         if self.metodo in self.METODOS_CON_REFERENCIA:
-            if not self.referencia.strip():
-                raise ValidationError("Indica la referencia del pago (pago móvil, Binance, Zinli) o el voucher de la tarjeta.")
             if self._calcular()[3] > 0:
                 raise ValidationError("El monto excede el saldo; con este método no se entrega vuelto.")
 

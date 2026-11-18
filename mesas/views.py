@@ -2,11 +2,12 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from caja.models import TasaCambio
 from config.dinero import precio_local_vigente
-from config.permisos import GRUPO_MESERO, es_admin, requiere_grupo, texto_validacion
+from config.permisos import GRUPO_MESERO, es_admin, nombres_grupos, requiere_grupo, texto_validacion
 from inventario.models import Categoria, Producto, Promocion
 from inventario.servicios import disponibilidad_menu
 from mesas.models import DetallePedido, Mesa, Pedido, SolicitudCliente
@@ -25,6 +26,11 @@ def _pedido_propio(request, pedido_id: int):
         messages.error(request, f"{quien} la atiende {pedido.mesero.username}.")
         return pedido, redirect("mesas:mapa")
     return pedido, None
+
+
+def _solo_supervisa(user) -> bool:
+    """El administrador que no es mesonero revisa el salón sin ocupar mesas."""
+    return es_admin(user) and GRUPO_MESERO not in nombres_grupos(user)
 
 
 def _volver(pedido: Pedido):
@@ -82,8 +88,13 @@ def _para_llevar():
 
 @requiere_grupo(GRUPO_MESERO)
 def mapa(request):
-    contexto = _contexto_mapa()
+    mesa_vista = None
+    ver = request.GET.get("ver", "")
+    if ver.isdigit():
+        mesa_vista = Mesa.objects.filter(pk=int(ver), activa=True).first()
+    contexto = _contexto_mapa(mesa_vista.pk if mesa_vista else None)
     contexto["llevar"] = _para_llevar()
+    contexto["mesa_vista"] = mesa_vista
     return render(request, "mesas/salon.html", contexto)
 
 
@@ -100,6 +111,12 @@ def mapa_parcial(request):
 @require_POST
 def abrir_pedido(request, mesa_id):
     mesa = get_object_or_404(Mesa, pk=mesa_id, activa=True)
+    if _solo_supervisa(request.user):
+        # Revisar no ocupa: si la mesa tiene comanda se muestra; si está libre, sigue libre.
+        pedido = mesa.pedido_activo()
+        if pedido is not None:
+            return _volver(pedido)
+        return redirect(reverse("mesas:mapa") + f"?ver={mesa.pk}")
     try:
         pedido, _ = Pedido.abrir_para(mesa.pk, request.user)
     except ValidationError as exc:
@@ -164,6 +181,7 @@ def comanda(request, pedido_id):
             "minutos_estimados": _minutos_pedido(pedido),
             "facturado": pedido.factura_activa,
             "hay_sin_enviar": any(not d.enviado for d in detalles),
+            "listos": sum(1 for d in detalles if d.estado == DetallePedido.Estado.LISTO),
             "nuevos": sum(d.cantidad for d in detalles if not d.enviado),
             "detalles": detalles,
             "subtotal_usd": _a_usd(pedido.subtotal),
@@ -501,3 +519,26 @@ def _minutos_pedido(pedido):
     from cocina.tiempos import estimar_pedido
 
     return estimar_pedido(pedido)
+
+
+
+@requiere_grupo(GRUPO_MESERO)
+@require_POST
+def entregar_todo(request, pedido_id):
+    """Marca como entregados, de una vez, todos los platos que cocina dejó listos."""
+    pedido, respuesta = _pedido_propio(request, pedido_id)
+    if respuesta:
+        return respuesta
+    listos = list(pedido.detalles.filter(estado=DetallePedido.Estado.LISTO).select_related("producto"))
+    if not listos:
+        messages.error(request, "No hay platos listos para entregar.")
+        return _volver(pedido)
+    try:
+        for detalle in listos:
+            detalle.marcar_entregado()
+    except ValidationError as exc:
+        messages.error(request, texto_validacion(exc))
+        return _volver(pedido)
+    total = sum(d.cantidad for d in listos)
+    messages.success(request, f"{total} plato{'s' if total != 1 else ''} entregado{'s' if total != 1 else ''} a {pedido.etiqueta}.")
+    return _volver(pedido)

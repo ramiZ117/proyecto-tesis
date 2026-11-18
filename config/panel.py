@@ -166,6 +166,7 @@ def indicadores(periodo: str = "hoy") -> dict:
         "periodos": list(PERIODOS.items()),
         "titulo_barras": {"hoy": "Ventas por hora", "semana": "Ventas por día", "mes": "Ventas por semana"}[periodo],
         "comparacion": {"hoy": "ayer", "semana": "la semana pasada", "mes": "el mes pasado"}[periodo],
+        "ganancia": _ganancia(desde, hasta),
         "ventas_local": datos["total_local"],
         "iva_local": datos["iva_local"],
         "base_local": datos["base_local"],
@@ -194,3 +195,10 @@ def _en_linea_hoy() -> int:
 
     return PedidoEnLinea.objects.filter(creado_en__date=timezone.localdate()).exclude(
         estado=PedidoEnLinea.Estado.RECHAZADO).count()
+
+
+
+def _ganancia(desde, hasta) -> dict:
+    from gestion.finanzas import ventas_y_costos
+
+    return ventas_y_costos(desde, hasta)

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Finanzas{% endblock %}
+{% block subtitle %}Ganancia real de {{ nombre_mes }} · montos en dólares, sin IVA ni propinas{% endblock %}
+{% block heading %}Finanzas y gastos{% endblock %}
+{% block top_actions %}
+  <form method="get" class="stack no-print" style="gap: 8px">
+    <a class="btn sm secundario" href="?mes={{ anterior }}" aria-label="Mes anterior">←</a>
+    <label class="oculto" for="mes">Mes</label>
+    <input id="mes" type="month" name="mes" value="{{ mes_valor }}" max="{{ mes_max }}" onchange="this.form.submit()" style="min-height: 40px; width: 180px">
+    {% if siguiente %}<a class="btn sm secundario" href="?mes={{ siguiente }}" aria-label="Mes siguiente">→</a>{% endif %}
+    <a class="btn sm secundario" href="?mes={{ mes_valor }}&amp;formato=csv">{% include "_icono.html" with nombre="descargar" %}CSV</a>
+    <button class="btn sm" type="button" onclick="window.print()">{% include "_icono.html" with nombre="imprimir" %}Imprimir</button>
+  </form>
+{% endblock %}
+{% block content %}
+<section class="grid-auto subir" style="--min: 200px; margin-bottom: 16px" aria-label="Resumen">
+  <article class="kpi"><small>Ventas sin IVA</small><strong>${{ r.ventas|intcomma }}</strong><span>{{ r.facturas }} factura{{ r.facturas|pluralize }} cobrada{{ r.facturas|pluralize }}</span></article>
+  <article class="kpi"><small>Ganancia bruta</small><strong class="{% if r.ganancia_bruta < 0 %}baja{% else %}sube{% endif %}">${{ r.ganancia_bruta|intcomma }}</strong><span>{% if r.margen_bruto is not None %}Margen {{ r.margen_bruto }} % sobre lo vendido{% else %}Sin ventas este mes{% endif %}</span></article>
+  <article class="kpi oscuro"><small>Ganancia neta</small><strong>${{ r.ganancia_neta|intcomma }}</strong><span>{% if r.margen_neto is not None %}{{ r.margen_neto }} % de las ventas, después de gastos{% else %}Después de gastos{% endif %}</span></article>
+  <article class="kpi"><small>Total invertido hoy</small><strong>${{ inversion.total|intcomma }}</strong><span>Inventario ${{ inversion.inventario|intcomma }} · equipos ${{ inversion.equipos|intcomma }}</span></article>
+</section>
+
+<div class="split">
+  <section class="card principal subir d1" aria-label="Estado de resultados">
+    <h2>Estado de resultados · {{ nombre_mes }}</h2>
+    <dl class="resultados">
+      <div><dt>Ventas sin IVA</dt><dd>${{ r.ventas|intcomma }}</dd></div>
+      <div class="resta"><dt>Costo de lo vendido <span class="obs">(recetas al costo del día de la venta)</span></dt><dd>− ${{ r.costo_ventas|intcomma }}</dd></div>
+      <div class="subtotal"><dt>Ganancia bruta</dt><dd>${{ r.ganancia_bruta|intcomma }}</dd></div>
+      <div class="resta"><dt>Mermas <span class="obs">(insumos perdidos)</span></dt><dd>− ${{ r.mermas|intcomma }}</dd></div>
+      <div class="resta"><dt>Gastos fijos del mes</dt><dd>− ${{ r.total_fijos|intcomma }}</dd></div>
+      <div class="resta"><dt>Gastos extraordinarios <span class="obs">(cuota del mes)</span></dt><dd>− ${{ r.total_extraordinarios|intcomma }}</dd></div>
+      <div class="total {% if r.ganancia_neta < 0 %}perdida{% endif %}"><dt>{% if r.ganancia_neta < 0 %}Pérdida del mes{% else %}Ganancia neta{% endif %}</dt><dd>${{ r.ganancia_neta|intcomma }}</dd></div>
+    </dl>
+    <p class="hint" style="margin: 8px 0 0">El IVA y el IGTF se le pagan al fisco y las propinas son de los meseros: no se cuentan como ingreso del local.</p>
+
+    <h3 style="margin-top: 22px">Ganancia por plato</h3>
+    <div class="tabla-caja">
+      <table>
+        <thead><tr><th>Plato</th><th class="der">Unid.</th><th class="der">Ventas</th><th class="der">Costo</th><th class="der">Ganancia</th><th class="der">Margen</th></tr></thead>
+        <tbody>
+          {% for f in platos %}
+            <tr data-filtrable="platos-finanzas">
+              <td class="fuerte">{{ f.producto.nombre }}</td>
+              <td class="der num">{{ f.unidades }}</td>
+              <td class="der num">${{ f.ventas|intcomma }}</td>
+              <td class="der num">${{ f.costo|intcomma }}</td>
+              <td class="der num fuerte {% if f.ganancia < 0 %}baja{% else %}sube{% endif %}">${{ f.ganancia|intcomma }}</td>
+              <td class="der num">{% if f.margen is not None %}{{ f.margen }} %{% else %}—{% endif %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="6" class="obs">No hubo ventas cobradas en {{ nombre_mes }}.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <nav class="paginador" data-paginar="platos-finanzas" data-por-pagina="12" aria-label="Páginas de platos"></nav>
+  </section>
+
+  <aside class="lateral subir d2">
+    <section class="card pila" id="gastos-fijos" style="gap: 10px">
+      <div class="card-cabecera" style="margin:0"><h2 style="margin:0">Gastos fijos mensuales</h2>
+        <a class="btn sm no-print" href="{% url 'gestion:gasto_fijo_nuevo' %}">{% include "_icono.html" with nombre="mas" grosor="2.4" %}Agregar</a></div>
+      {% for g in gastos_fijos %}
+        <div class="gasto-fila{% if not g.vigente %} apagado{% endif %}">
+          <div><strong>{{ g.nombre }}</strong><div class="obs">{{ g.get_categoria_display }} · desde {{ g.desde|date:"m/Y" }}{% if g.hasta %} hasta {{ g.hasta|date:"m/Y" }}{% endif %}</div></div>
+          <div class="gasto-acciones"><strong class="num">${{ g.monto_usd|intcomma }}</strong>
+            <a class="btn sm secundario no-print" href="{% url 'gestion:gasto_fijo' g.pk %}">Editar</a>
+            <form method="post" action="{% url 'gestion:gasto_eliminar' 'fijo' g.pk %}" class="no-print" data-confirmar="¿Eliminar el gasto fijo «{{ g.nombre }}»? Dejará de contarse en todos los meses. Si solo dejó de pagarse, mejor edítalo y pon la fecha «Hasta»." data-confirmar-peligro>{% csrf_token %}<button class="ghost" type="submit" aria-label="Eliminar {{ g.nombre }}">✕</button></form>
+          </div>
+        </div>
+      {% empty %}
+        <p class="vacio" style="margin:0">Registra el alquiler, los servicios, la nómina… para conocer la ganancia real.</p>
+      {% endfor %}
+      <p class="hint" style="margin:0">Este mes suman <strong>${{ r.total_fijos|intcomma }}</strong>.</p>
+    </section>
+
+    <section class="card pila" id="gastos-extra" style="gap: 10px">
+      <div class="card-cabecera" style="margin:0"><h2 style="margin:0">Gastos fuertes e inversiones</h2>
+        <a class="btn sm no-print" href="{% url 'gestion:gasto_extra_nuevo' %}">{% include "_icono.html" with nombre="mas" grosor="2.4" %}Registrar</a></div>
+      {% for g in gastos_extra %}
+        <div class="gasto-fila">
+          <div><strong>{{ g.descripcion }}</strong><div class="obs">{{ g.fecha|date:"d/m/Y" }} · {{ g.get_categoria_display }}{% if g.meses > 1 %} · {{ g.meses }} cuotas de ${{ g.cuota_usd|intcomma }}{% endif %}</div></div>
+          <div class="gasto-acciones"><strong class="num">${{ g.monto_usd|intcomma }}</strong>
+            <a class="btn sm secundario no-print" href="{% url 'gestion:gasto_extra' g.pk %}">Editar</a>
+            <form method="post" action="{% url 'gestion:gasto_eliminar' 'extra' g.pk %}" class="no-print" data-confirmar="¿Eliminar el gasto «{{ g.descripcion }}»?" data-confirmar-peligro>{% csrf_token %}<button class="ghost" type="submit" aria-label="Eliminar {{ g.descripcion }}">✕</button></form>
+          </div>
+        </div>
+      {% empty %}
+        <p class="vacio" style="margin:0">Registra aquí compras de máquinas, reparaciones o remodelaciones.</p>
+      {% endfor %}
+      {% if r.extraordinarios %}
+        <p class="hint" style="margin:0">En {{ nombre_mes }} se descuentan: {% for g in r.extraordinarios %}{{ g.descripcion }} (${{ g.cuota_mes|intcomma }}{% if g.meses > 1 %}, cuota {{ g.numero_cuota }} de {{ g.meses }}{% endif %}){% if not forloop.last %} · {% endif %}{% endfor %}.</p>
+      {% endif %}
+    </section>
+  </aside>
+</div>
+{% endblock %}

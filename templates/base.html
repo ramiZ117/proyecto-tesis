@@ -44,6 +44,7 @@
         {% if es_admin %}
           <div class="nav-titulo">Administración</div>
           <a href="{% url 'usuarios' %}" class="{% if vista == 'usuarios' or vista == 'usuario_nuevo' or vista == 'usuario_editar' %}activo{% endif %}">{% include "_icono.html" with nombre="usuarios" %}Usuarios</a>
+          <a href="{% url 'gestion:finanzas' %}" class="{% if vista == 'finanzas' or vista == 'gasto_fijo' or vista == 'gasto_fijo_nuevo' or vista == 'gasto_extra' or vista == 'gasto_extra_nuevo' %}activo{% endif %}">{% include "_icono.html" with nombre="reportes" %}Finanzas y gastos</a>
           <a href="{% url 'gestion:carta' %}" class="{% if seccion == 'gestion' and vista == 'carta' or vista == 'plato' or vista == 'plato_nuevo' or vista == 'categoria' or vista == 'categoria_nueva' %}activo{% endif %}">{% include "_icono.html" with nombre="libro" %}Carta y recetas</a>
           <a href="{% url 'gestion:promociones' %}" class="{% if vista == 'promociones' or vista == 'promocion' or vista == 'promocion_nueva' %}activo{% endif %}">{% include "_icono.html" with nombre="promo" %}Promociones</a>
           <a href="{% url 'gestion:insumos' %}" class="{% if vista == 'insumos' or vista == 'insumo' or vista == 'insumo_nuevo' %}activo{% endif %}">{% include "_icono.html" with nombre="inventario" %}Insumos</a>

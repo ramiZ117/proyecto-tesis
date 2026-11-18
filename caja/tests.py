@@ -129,11 +129,10 @@ class PagosTests(DatosBase):
         self.assertEqual(f.saldo_local, Decimal("0.00"))
         self.assertEqual(f.estado, Factura.Estado.PAGADA)
 
-    def test_pago_movil_y_tarjeta_exigen_referencia(self):
+    def test_la_referencia_y_el_voucher_son_opcionales(self):
         f = self.factura()
-        for metodo in ("PMO", "TAR"):
-            with self.assertRaisesMessage(ValidationError, "referencia"):
-                f.cobrar(metodo=metodo, monto=Decimal("100"))
+        sin_ref, _ = f.cobrar(metodo="TAR", monto=Decimal("100"))
+        self.assertEqual(sin_ref.referencia, "")
         pago, _ = f.cobrar(metodo="PMO", monto=Decimal("100"), referencia="00123456")
         self.assertEqual(pago.referencia, "00123456")
 

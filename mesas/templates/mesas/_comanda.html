@@ -77,6 +77,12 @@
   {% if cuenta_cliente %}
     <p class="pill FAC" style="white-space: normal; margin: 0 0 10px">La mesa pidió la cuenta desde el menú: paga con {{ cuenta_cliente.get_metodo_display }}{% if cuenta_cliente.estado == "REP" %} (pago reportado, caja lo verifica){% endif %}.</p>
   {% endif %}
+  {% if listos >= 2 %}
+    <form method="post" action="{% url 'mesas:entregar_todo' pedido.pk %}" class="entregar-todo">
+      {% csrf_token %}
+      <button class="btn bloque" type="submit">{% include "_icono.html" with nombre="check" grosor="2.6" %}Entregar todo ({{ listos }} listos)</button>
+    </form>
+  {% endif %}
   <div class="comanda-items">
     {% for d in detalles %}
       <div class="item-comanda">

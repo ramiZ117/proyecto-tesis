@@ -301,12 +301,16 @@ def _estado_cuenta(mesa, pedido_previo=None) -> dict:
         if mesa and str(pedido_previo or "").isdigit():
             pagada = Pedido.objects.filter(pk=int(pedido_previo), mesa=mesa, estado=Pedido.Estado.CERRADO).exists()
         return {"disponible": False, "pagada": pagada}
-    entregado = pedido.detalles.filter(estado=DetallePedido.Estado.ENTREGADO).exists()
+    # Se puede pedir la cuenta en cuanto el pedido está en cocina (aunque falten platos: p. ej. para llevar).
+    en_cocina = pedido.detalles.filter(enviado=True).exclude(estado=DetallePedido.Estado.ANULADO).exists()
+    pendientes = sum(pedido.detalles.filter(enviado=True, estado__in=[DetallePedido.Estado.PENDIENTE,
+                     DetallePedido.Estado.EN_PREPARACION, DetallePedido.Estado.LISTO]).values_list("cantidad", flat=True))
     factura = pedido.factura_activa
     tasa = Decimal(factura.tasa_cambio) if factura else getattr(TasaCambio.objects.filter(activa=True).first(), "valor", None)
     total_bs = factura.saldo_local if factura else pedido.subtotal
     datos = {
-        "disponible": entregado, "pagada": False, "pedido": pedido.pk,
+        "disponible": en_cocina, "pagada": False, "pedido": pedido.pk,
+        "pendientes": pendientes, "pendientes_min": _minutos_pedido(pedido) if pendientes else None,
         "total_bs": num(total_bs, 2), "total_usd": num((total_bs / tasa).quantize(Decimal("0.01"), rounding="ROUND_CEILING"), 2) if tasa else "",
         "solicitud": None,
     }
@@ -369,8 +373,8 @@ def pedir_cuenta(request):
     if not _limitar(request, "cuenta", 30):
         return JsonResponse({"error": "Demasiados intentos. Pide la cuenta a tu mesero."}, status=429)
     pedido = _pedido_de_mesa(mesa)
-    if pedido is None or not pedido.detalles.filter(estado=DetallePedido.Estado.ENTREGADO).exists():
-        return JsonResponse({"error": "Podrás pedir la cuenta cuando tu mesero te entregue la comida."}, status=409)
+    if pedido is None or not pedido.detalles.filter(enviado=True).exclude(estado=DetallePedido.Estado.ANULADO).exists():
+        return JsonResponse({"error": "Podrás pedir la cuenta cuando tu pedido esté en la cocina."}, status=409)
     datos_factura = None
     if datos.get("factura"):
         from caja.models import datos_cliente_validos
@@ -378,6 +382,11 @@ def pedir_cuenta(request):
         datos_factura, error_factura = datos_cliente_validos(datos.get("factura"))
         if error_factura:
             return JsonResponse({"error": error_factura}, status=400)
+    if datos.get("para_llevar") is True and "Lo pendiente, para llevar" not in pedido.notas:
+        # Llega a cocina (nota de la comanda en el ticket) y al mesero.
+        pedido.notas = (f"{pedido.notas} · " if pedido.notas else "") + "Lo pendiente, para llevar"
+        pedido.notas = pedido.notas[:250]
+        pedido.save(update_fields=["notas", "actualizado_en"])
     try:
         SolicitudCuenta.pedir(pedido, metodo, datos_factura)
     except ValidationError as exc:

@@ -1,7 +1,11 @@
 """Ajustes del local que el administrador edita desde el sistema (sin tocar el servidor)."""
 
 from django.core.cache import cache
-from django.core.validators import RegexValidator
+from datetime import date
+from decimal import Decimal
+
+from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 
 CLAVE_CACHE = "gestion:ajustes_local"
@@ -29,6 +33,8 @@ class AjustesLocal(models.Model):
         "Recibir pedidos para retirar desde el menú en línea", default=True,
         help_text="Solo con pago móvil, Binance o Zinli configurados: el cliente paga y sube el comprobante.",
     )
+    pedidosya_url = models.URLField("Enlace a PedidosYa", blank=True, help_text="La página del local dentro de PedidosYa (opcional).")
+    yummy_url = models.URLField("Enlace a Yummy", blank=True, help_text="La página del local dentro de Yummy (opcional).")
     mostrar_delivery = models.BooleanField(
         "Mostrar el aviso de delivery en el menú", default=True,
         help_text="«Pide a domicilio por PedidosYa y Yummy», aunque no tengas los enlaces.",
@@ -91,3 +97,89 @@ class AjustesLocal(models.Model):
         if metodo == "ZIN":
             return [("Correo Zinli", self.zinli_correo)]
         return []
+
+
+
+class GastoFijo(models.Model):
+    """Gasto que se repite cada mes (alquiler, servicios, nómina…). Cuenta en cada mes de su vigencia."""
+
+    class Categoria(models.TextChoices):
+        ALQUILER = "ALQ", "Alquiler"
+        SERVICIOS = "SER", "Servicios (luz, agua, gas, internet)"
+        NOMINA = "NOM", "Nómina"
+        IMPUESTOS = "IMP", "Impuestos y permisos"
+        MANTENIMIENTO = "MAN", "Mantenimiento"
+        OTRO = "OTR", "Otro"
+
+    nombre = models.CharField(max_length=80, unique=True)
+    categoria = models.CharField(max_length=3, choices=Categoria.choices, default=Categoria.OTRO)
+    monto_usd = models.DecimalField("Monto mensual (USD)", max_digits=12, decimal_places=2,
+                                    validators=[MinValueValidator(Decimal("0.01"))])
+    desde = models.DateField("Se paga desde", default=date.today, help_text="Mes en que empieza a contar.")
+    hasta = models.DateField("Hasta", null=True, blank=True, help_text="Vacío: sigue vigente.")
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "gasto fijo"
+        verbose_name_plural = "gastos fijos"
+        ordering = ["categoria", "nombre"]
+
+    def __str__(self) -> str:
+        return self.nombre
+
+    @property
+    def vigente(self) -> bool:
+        return self.hasta is None or self.hasta >= date.today()
+
+    def aplica_en(self, inicio_mes: date, fin_mes: date) -> bool:
+        return self.desde <= fin_mes and (self.hasta is None or self.hasta >= inicio_mes)
+
+
+class GastoExtraordinario(models.Model):
+    """Gasto fuerte o puntual (una máquina, una reparación…). Se descuenta en el mes de su fecha
+    o, si se reparte, una cuota igual durante varios meses (amortización)."""
+
+    class Categoria(models.TextChoices):
+        EQUIPOS = "EQU", "Equipos y maquinaria"
+        MOBILIARIO = "MOB", "Mobiliario y remodelación"
+        REPARACION = "REP", "Reparaciones"
+        OTRO = "OTR", "Otro"
+
+    INVERSION = (Categoria.EQUIPOS, Categoria.MOBILIARIO)
+
+    fecha = models.DateField(default=date.today)
+    descripcion = models.CharField("Descripción", max_length=120)
+    categoria = models.CharField(max_length=3, choices=Categoria.choices, default=Categoria.EQUIPOS)
+    monto_usd = models.DecimalField("Monto (USD)", max_digits=12, decimal_places=2,
+                                    validators=[MinValueValidator(Decimal("0.01"))])
+    meses = models.PositiveSmallIntegerField(
+        "Repartir en (meses)", default=1, validators=[MinValueValidator(1), MaxValueValidator(60)],
+        help_text="1 = se descuenta completo ese mes. Para una máquina cara puedes repartirlo (ej.: 12 meses).",
+    )
+    registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                                       related_name="gastos_registrados")
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "gasto extraordinario"
+        verbose_name_plural = "gastos extraordinarios"
+        ordering = ["-fecha", "-id"]
+
+    def __str__(self) -> str:
+        return self.descripcion
+
+    @property
+    def cuota_usd(self) -> Decimal:
+        return (self.monto_usd / self.meses).quantize(Decimal("0.01"))
+
+    def _indice_mes(self, anio: int, mes: int) -> int:
+        return (anio - self.fecha.year) * 12 + (mes - self.fecha.month)
+
+    def cuota_en(self, anio: int, mes: int) -> Decimal:
+        """Lo que toca descontar en ese mes (la última cuota absorbe el redondeo)."""
+        i = self._indice_mes(anio, mes)
+        if not 0 <= i < self.meses:
+            return Decimal("0.00")
+        if i == self.meses - 1:
+            return self.monto_usd - self.cuota_usd * (self.meses - 1)
+        return self.cuota_usd

@@ -20,6 +20,11 @@
     <strong>Bs {{ ventas_local|intcomma }}</strong>
     <span>${{ ventas_usd|intcomma }} en dólares</span>
   </article>
+  <a class="kpi alzar subir d2" href="{% url 'gestion:finanzas' %}" style="text-decoration: none; color: inherit">
+    <small>Ganancia bruta</small>
+    <strong>${{ ganancia.ganancia_bruta|intcomma }}</strong>
+    <span>{% if ganancia.margen_bruto is not None %}Margen {{ ganancia.margen_bruto }} % · costo ${{ ganancia.costo_ventas|intcomma }}{% else %}Sin ventas en el período{% endif %} · ver finanzas →</span>
+  </a>
   <article class="kpi alzar subir d2">
     <small>Facturas cobradas</small>
     <strong>{{ facturas }}</strong>

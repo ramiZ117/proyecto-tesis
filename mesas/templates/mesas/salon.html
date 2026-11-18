@@ -14,7 +14,7 @@
 {% block content %}
 <div class="salon{% if pedido %} con-comanda{% endif %}">
   <section class="salon-mapa">
-    <div id="mapa" class="subir d1" data-refresco="{% url 'mesas:mapa_parcial' %}{% if pedido.mesa_id %}?sel={{ pedido.mesa_id }}{% endif %}">{% include "mesas/_mapa_grid.html" %}</div>
+    <div id="mapa" class="subir d1" data-refresco="{% url 'mesas:mapa_parcial' %}{% if pedido.mesa_id %}?sel={{ pedido.mesa_id }}{% elif mesa_vista %}?sel={{ mesa_vista.pk }}{% endif %}">{% include "mesas/_mapa_grid.html" %}</div>
 
     <section id="llevar" class="card subir d2" aria-label="Pedidos para llevar">
       <div class="card-cabecera">
@@ -45,6 +45,16 @@
   <aside class="salon-panel subir d3" aria-label="Comanda">
     {% if pedido %}
       {% include "mesas/_comanda.html" %}
+    {% elif mesa_vista %}
+      <div class="comanda">
+        <div class="panel-vacio">
+          {% include "_icono.html" with nombre="mesas" grosor="1.5" %}
+          <h2 style="margin:0">Mesa {{ mesa_vista.numero }}</h2>
+          <p style="margin:0">{{ mesa_vista.capacidad }} personas · {{ mesa_vista.get_forma_display }} · <strong>{{ mesa_vista.get_estado_display }}</strong></p>
+          <p class="obs" style="margin:0">Estás revisando como administrador: la mesa no se ocupa. Queda ocupada cuando un mesonero la abre al sentar a los clientes.</p>
+          <a class="btn secundario" href="{% url 'mesas:mapa' %}">Cerrar</a>
+        </div>
+      </div>
     {% else %}
       <div class="comanda">
         <div class="panel-vacio">

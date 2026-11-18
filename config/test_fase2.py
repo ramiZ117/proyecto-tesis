@@ -404,8 +404,8 @@ class TasaYValidacionesTests(DatosBase):
         for monto in ("", "0", "-10", "abc", "99999999"):
             r = c.post(f"/caja/factura/{factura.pk}/pago/", {"metodo": "EFE", "monto_recibido": monto}, follow=True)
             self.assertContains(r, "monto válido", msg_prefix=monto)
-        r = c.post(f"/caja/factura/{factura.pk}/pago/", {"metodo": "PMO", "monto_recibido": "40"}, follow=True)
-        self.assertContains(r, "referencia")
+        r = c.post(f"/caja/factura/{factura.pk}/pago/", {"metodo": "PMO", "monto_recibido": "50"}, follow=True)
+        self.assertContains(r, "no se entrega vuelto")  # sin referencia sí se acepta, pero no puede sobrar
         r = c.post(f"/caja/factura/{factura.pk}/pago/", {"metodo": "ZZZ", "monto_recibido": "40"}, follow=True)
         self.assertContains(r, "Método de pago no válido")
         self.assertFalse(factura.pagos.exists())

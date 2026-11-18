@@ -125,8 +125,8 @@
         </div>
       </div>
       <div class="delivery-apps">
-        <span class="app-delivery pedidosya">PedidosYa</span>
-        <span class="app-delivery yummy">Yummy</span>
+        {% if ajustes.pedidosya_url %}<a class="app-delivery pedidosya" href="{{ ajustes.pedidosya_url }}" target="_blank" rel="noopener noreferrer">Pedir en PedidosYa</a>{% else %}<span class="app-delivery pedidosya">PedidosYa</span>{% endif %}
+        {% if ajustes.yummy_url %}<a class="app-delivery yummy" href="{{ ajustes.yummy_url }}" target="_blank" rel="noopener noreferrer">Pedir en Yummy</a>{% else %}<span class="app-delivery yummy">Yummy</span>{% endif %}
       </div>
     </section>
     {% endif %}
@@ -164,7 +164,11 @@
       {% if pedir %}
         <p><strong>¿Listo para ordenar?</strong> Arma tu pedido y toca «Solicitar mesero»: él lo confirma contigo y lo envía a la cocina.</p>
       {% elif modo == "retiro" %}
-        <p><strong>¿Quieres retirarlo en el local?</strong> Arma tu pedido, págalo por {% for m in config_menu.metodos_retiro %}{{ m.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %} y sube el comprobante: te avisamos cuando esté listo.</p>
+        {% if config_menu.metodos_retiro %}
+          <p><strong>¿Quieres retirarlo en el local?</strong> Arma tu pedido, págalo por {% for m in config_menu.metodos_retiro %}{% if not forloop.first %}{% if forloop.last %} o {% else %}, {% endif %}{% endif %}{{ m.nombre }}{% endfor %} y sube el comprobante: te avisamos cuando esté listo.</p>
+        {% else %}
+          <p><strong>¿Quieres retirarlo en el local?</strong> Arma tu pedido y llámanos{% if local.telefono %} al {{ local.telefono }}{% endif %} para confirmarlo.</p>
+        {% endif %}
       {% else %}
         <p><strong>¿Listo para ordenar?</strong> Llama a tu mesonero{% if mesa %} de la mesa {{ mesa.numero }}{% endif %}.{% if not mesa %} Escanea el QR de tu mesa para armar tu pedido desde aquí.{% endif %}</p>
       {% endif %}
@@ -272,7 +276,7 @@
         <input id="pedido-nota" maxlength="200" placeholder="{% if pedir %}Ej.: traer todo junto, somos 4{% else %}Ej.: salsa aparte{% endif %}" autocomplete="off">
         {% if not pedir %}
         <button class="boton-ia" type="button" id="ir-al-pago">Continuar: pagar y retirar</button>
-        <p class="muted aviso-pedido">Pagas por {% for m in config_menu.metodos_retiro %}{{ m.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %}, subes el comprobante y lo retiras en el local cuando te avisemos.</p>
+        <p class="muted aviso-pedido">{% if config_menu.metodos_retiro %}Pagas por {% for m in config_menu.metodos_retiro %}{% if not forloop.first %}{% if forloop.last %} o {% else %}, {% endif %}{% endif %}{{ m.nombre }}{% endfor %}, subes el comprobante y lo retiras en el local cuando te avisemos.{% else %}Por ahora no recibimos pagos en línea: llámanos{% if local.telefono %} al {{ local.telefono }}{% endif %} para confirmar tu pedido.{% endif %}</p>
         {% else %}
         <button class="boton-ia" type="button" id="enviar-pedido">
           <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>

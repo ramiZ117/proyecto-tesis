@@ -26,4 +26,10 @@ urlpatterns = [
     path("promociones/<int:promocion_id>/activa/", views.promocion_activa, name="promocion_activa"),
     path("menu-digital/", views.menu_digital, name="menu_digital"),
     path("cobros-y-delivery/", views.ajustes, name="ajustes"),
+    path("finanzas/", views.finanzas, name="finanzas"),
+    path("finanzas/gasto-fijo/nuevo/", views.gasto_fijo, name="gasto_fijo_nuevo"),
+    path("finanzas/gasto-fijo/<int:gasto_id>/", views.gasto_fijo, name="gasto_fijo"),
+    path("finanzas/gasto/nuevo/", views.gasto_extraordinario, name="gasto_extra_nuevo"),
+    path("finanzas/gasto/<int:gasto_id>/", views.gasto_extraordinario, name="gasto_extra"),
+    path("finanzas/<str:tipo>/<int:gasto_id>/eliminar/", views.gasto_eliminar, name="gasto_eliminar"),
 ]

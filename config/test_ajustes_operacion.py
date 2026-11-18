@@ -173,6 +173,15 @@ class MenuTests(DatosBase):
         self.assertIn("PedidosYa", contenido)
         self.assertNotIn('href="#delivery"', contenido)
         self.assertNotIn("pedidosya.com", contenido)
+        # con enlace cargado, el botón de abajo abre la tienda (en otra pestaña, sin mover el menú)
+        AjustesLocal.objects.update_or_create(pk=1, defaults={"pedidosya_url": "https://www.pedidosya.com.ve/elamir"})
+        cache.clear()
+        r2 = Client().get("/menu/").content.decode()
+        self.assertIn('href="https://www.pedidosya.com.ve/elamir" target="_blank"', r2)
+        self.assertNotIn('href="#delivery"', r2)
+        admin = self.cliente(self.admin)
+        r3 = admin.post("/gestion/cobros-y-delivery/", {"yummy_url": "http://inseguro.com", "retiro_activo": "on", "mostrar_delivery": "on"})
+        self.assertContains(r3, "https://")
         self.assertContains(r, "Agregar a mi pedido")  # se puede armar el pedido para retirar
         AjustesLocal.objects.update_or_create(pk=1, defaults={"retiro_activo": False})
         cache.clear()
@@ -187,3 +196,48 @@ class MenuTests(DatosBase):
     def test_las_tablas_de_inventario_se_paginan(self):
         self.assertContains(self.cliente(self.cajero).get("/inventario/"), 'data-paginar="insumos"')
         self.assertContains(self.cliente(self.admin).get("/gestion/insumos/"), 'data-paginar="insumos-admin"')
+
+
+
+class EntregarTodoTests(DatosBase):
+    def test_el_mesero_entrega_todos_los_platos_listos(self):
+        pedido = self.pedido(items=[(self.bistec, 1), (self.agua, 2), (self.hamburguesa, 1)])
+        for d in pedido.detalles.exclude(producto=self.hamburguesa):
+            d.marcar_en_preparacion()
+            d.marcar_listo()
+        mesero = self.cliente(self.mesero)
+        self.assertContains(mesero.get(f"/mesas/comanda/{pedido.pk}/"), "Entregar todo (2 listos)")
+        r = mesero.post(f"/mesas/comanda/{pedido.pk}/entregar-todo/", follow=True)
+        self.assertContains(r, "3 platos entregados")
+        estados = dict(pedido.detalles.values_list("producto_id", "estado"))
+        self.assertEqual(estados[self.bistec.pk], DetallePedido.Estado.ENTREGADO)
+        self.assertEqual(estados[self.hamburguesa.pk], DetallePedido.Estado.PENDIENTE)  # lo que no está listo no se toca
+        r = mesero.post(f"/mesas/comanda/{pedido.pk}/entregar-todo/", follow=True)
+        self.assertContains(r, "No hay platos listos")
+        # otro mesero no puede entregar la mesa ajena
+        self.cliente(self.mesero2).post(f"/mesas/comanda/{pedido.pk}/entregar-todo/")
+
+
+
+class AdminRevisaMesasTests(DatosBase):
+    def test_el_admin_revisa_una_mesa_libre_sin_ocuparla(self):
+        admin = self.cliente(self.admin)
+        r = admin.post(f"/mesas/abrir/{self.mesa3.pk}/", follow=True)
+        self.assertContains(r, "la mesa no se ocupa")
+        self.mesa3.refresh_from_db()
+        self.assertEqual(self.mesa3.estado, Mesa.Estado.DISPONIBLE)
+        from mesas.models import Pedido
+
+        self.assertFalse(Pedido.objects.filter(mesa=self.mesa3).exists())
+
+    def test_el_admin_ve_la_comanda_de_una_mesa_atendida(self):
+        pedido = self.pedido(mesa=self.mesa2, mesero=self.mesero, items=[(self.agua, 1)])
+        r = self.cliente(self.admin).post(f"/mesas/abrir/{self.mesa2.pk}/")
+        self.assertRedirects(r, f"/mesas/comanda/{pedido.pk}/", fetch_redirect_response=False)
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.mesero, self.mesero)  # sigue siendo del mesonero
+
+    def test_el_mesonero_si_ocupa_la_mesa(self):
+        self.cliente(self.mesero).post(f"/mesas/abrir/{self.mesa3.pk}/")
+        self.mesa3.refresh_from_db()
+        self.assertEqual(self.mesa3.estado, Mesa.Estado.OCUPADA)

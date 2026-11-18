@@ -11,7 +11,7 @@ from django.utils.text import slugify
 
 from config.formato import num
 from inventario.models import Categoria, Insumo, Producto, Promocion, PromocionItem, Proveedor, Receta
-from gestion.models import AjustesLocal
+from gestion.models import AjustesLocal, GastoExtraordinario, GastoFijo
 from mesas.models import Mesa
 
 FOTO_LADO_MAX = 1400
@@ -372,6 +372,8 @@ class AjustesLocalForm(_Estilo, forms.ModelForm):
             "pm_documento": forms.TextInput(attrs={"placeholder": "J-123456789"}),
             "pm_banco": forms.TextInput(attrs={"placeholder": "Ej.: Banesco (0134)"}),
             "binance_id": forms.TextInput(attrs={"placeholder": "Pay ID o correo"}),
+            "pedidosya_url": forms.URLInput(attrs={"placeholder": "https://www.pedidosya.com.ve/…"}),
+            "yummy_url": forms.URLInput(attrs={"placeholder": "https://…"}),
         }
 
     def clean_pm_documento(self):
@@ -382,4 +384,81 @@ class AjustesLocalForm(_Estilo, forms.ModelForm):
         pm = [datos.get("pm_banco"), datos.get("pm_telefono"), datos.get("pm_documento")]
         if any(pm) and not all(pm):
             raise forms.ValidationError("Para activar el pago móvil completa banco, teléfono y cédula/RIF (o déjalos los tres vacíos).")
+        for campo in ("pedidosya_url", "yummy_url"):
+            url = datos.get(campo)
+            if url and not url.startswith("https://"):
+                self.add_error(campo, "Usa un enlace seguro que empiece con https://")
         return datos
+
+
+
+class GastoFijoForm(_Estilo, forms.ModelForm):
+    class Meta:
+        model = GastoFijo
+        fields = ["nombre", "categoria", "monto_usd", "desde", "hasta"]
+        error_messages = {"nombre": {"unique": "Ya existe un gasto fijo con ese nombre."}}
+        widgets = {
+            "monto_usd": forms.NumberInput(attrs={"step": "0.01", "min": "0.01"}),
+            "desde": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
+            "hasta": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
+        }
+
+    def clean_nombre(self):
+        nombre = " ".join(self.cleaned_data["nombre"].split())
+        if len(nombre) < 3:
+            raise forms.ValidationError("Escribe un nombre (ej.: Alquiler del local).")
+        return nombre
+
+    def clean_monto_usd(self):
+        monto = self.cleaned_data["monto_usd"]
+        if monto is None or monto <= 0:
+            raise forms.ValidationError("El monto debe ser mayor a cero.")
+        if monto > Decimal("1000000"):
+            raise forms.ValidationError("Revisa el monto: es demasiado alto.")
+        return monto
+
+    def clean(self):
+        datos = super().clean()
+        if datos.get("desde") and datos.get("hasta") and datos["hasta"] < datos["desde"]:
+            self.add_error("hasta", "No puede terminar antes de empezar.")
+        return datos
+
+
+class GastoExtraordinarioForm(_Estilo, forms.ModelForm):
+    class Meta:
+        model = GastoExtraordinario
+        fields = ["fecha", "descripcion", "categoria", "monto_usd", "meses"]
+        widgets = {
+            "fecha": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
+            "monto_usd": forms.NumberInput(attrs={"step": "0.01", "min": "0.01"}),
+            "meses": forms.NumberInput(attrs={"min": 1, "max": 60}),
+            "descripcion": forms.TextInput(attrs={"placeholder": "Ej.: Plancha industrial de 90 cm"}),
+        }
+
+    def clean_descripcion(self):
+        texto = " ".join(self.cleaned_data["descripcion"].split())
+        if len(texto) < 3:
+            raise forms.ValidationError("Describe el gasto.")
+        return texto
+
+    def clean_monto_usd(self):
+        monto = self.cleaned_data["monto_usd"]
+        if monto is None or monto <= 0:
+            raise forms.ValidationError("El monto debe ser mayor a cero.")
+        if monto > Decimal("10000000"):
+            raise forms.ValidationError("Revisa el monto: es demasiado alto.")
+        return monto
+
+    def clean_meses(self):
+        meses = self.cleaned_data["meses"]
+        if meses is None or not 1 <= meses <= 60:
+            raise forms.ValidationError("Entre 1 y 60 meses.")
+        return meses
+
+    def clean_fecha(self):
+        from django.utils import timezone
+
+        fecha = self.cleaned_data["fecha"]
+        if fecha > timezone.localdate():
+            raise forms.ValidationError("La fecha no puede ser futura.")
+        return fecha

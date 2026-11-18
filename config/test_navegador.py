@@ -129,9 +129,8 @@ class NavegadorTests(StaticLiveServerTestCase):
 
         # Salón: entregar y pedir la cuenta.
         sala.reload()
-        for _ in range(2):
-            sala.click("button:has-text('Entregar') >> nth=0")
-            self.esperar_mensaje(sala, "marcado como entregado")
+        sala.click("button:has-text('Entregar todo')")
+        self.esperar_mensaje(sala, "platos entregados")
         sala.click("button:has-text('Pedir cuenta')")
         self.esperar_mensaje(sala, "por facturar")
 

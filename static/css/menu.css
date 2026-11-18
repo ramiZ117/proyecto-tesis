@@ -321,3 +321,6 @@ dialog.aviso-menu::backdrop { background: rgba(10,25,18,.55); }
 .tiempo-retiro { margin: 8px 0 0 !important; font-weight: 800; color: var(--verde-700) !important; }
 .delivery-chip { cursor: default; }
 span.app-delivery { cursor: default; opacity: 1; }
+
+.botones-pregunta { display: grid; gap: 8px; }
+.casilla-pregunta[hidden] { display: none; }

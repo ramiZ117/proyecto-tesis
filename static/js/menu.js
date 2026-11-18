@@ -49,6 +49,46 @@
     if (dlgAviso.showModal) dlgAviso.showModal(); else dlgAviso.setAttribute("open", "");
   }
 
+  /* Pregunta con dos botones y una casilla opcional. Resuelve {ok, marcada}. */
+  var dlgPregunta = null;
+  function preguntar(texto, casilla, textoSi, textoNo) {
+    if (!dlgPregunta) {
+      dlgPregunta = elemento("dialog", "aviso-menu");
+      var cuerpo = elemento("form", "aviso-cuerpo");
+      cuerpo.method = "dialog";
+      var parrafo = elemento("p", "aviso-texto");
+      var etiqueta = elemento("label", "check-factura casilla-pregunta");
+      var caja = elemento("input");
+      caja.type = "checkbox";
+      etiqueta.append(caja, elemento("span"));
+      var botones = elemento("div", "botones-pregunta");
+      var no = elemento("button", "enlace-cambiar");
+      no.value = "no";
+      var si = elemento("button", "boton-agregar");
+      si.value = "si";
+      botones.append(si, no);
+      cuerpo.append(parrafo, etiqueta, botones);
+      dlgPregunta.appendChild(cuerpo);
+      dlgPregunta.addEventListener("click", function (e) { if (e.target === dlgPregunta) dlgPregunta.close("no"); });
+      document.body.appendChild(dlgPregunta);
+    }
+    dlgPregunta.querySelector(".aviso-texto").textContent = texto;
+    var fila = dlgPregunta.querySelector(".casilla-pregunta");
+    fila.hidden = !casilla;
+    fila.querySelector("input").checked = false;
+    fila.querySelector("span").textContent = casilla || "";
+    dlgPregunta.querySelector("button[value=si]").textContent = textoSi;
+    dlgPregunta.querySelector("button[value=no]").textContent = textoNo;
+    return new Promise(function (resolver) {
+      dlgPregunta.returnValue = "";
+      dlgPregunta.addEventListener("close", function alCerrar() {
+        dlgPregunta.removeEventListener("close", alCerrar);
+        resolver({ ok: dlgPregunta.returnValue === "si", marcada: fila.querySelector("input").checked });
+      });
+      if (dlgPregunta.showModal) dlgPregunta.showModal(); else dlgPregunta.setAttribute("open", "");
+    });
+  }
+
   function normalizar(t) {
     return (t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
   }
@@ -615,7 +655,19 @@
         .then(function () { if (boton) boton.disabled = false; });
     }
 
-    btnCuenta.addEventListener("click", function () { if (cuentaActual) pintarCuenta(cuentaActual); abrirDialogo(dlgCuenta); });
+    var paraLlevar = false;
+    btnCuenta.addEventListener("click", function () {
+      var c = cuentaActual || {};
+      function abrir() { if (cuentaActual) pintarCuenta(cuentaActual); abrirDialogo(dlgCuenta); }
+      if (!c.pendientes || c.solicitud) { abrir(); return; }
+      var cuando = c.pendientes_min ? "estará lista en aproximadamente " + c.pendientes_min + " min" : "ya está lista y tu mesero te la trae";
+      var texto = "Aún falta una parte de tu pedido (" + c.pendientes + " plato" + (c.pendientes === 1 ? "" : "s") + ") que " + cuando + ". Puedes pedir la cuenta igual.";
+      preguntar(texto, "Quiero lo que falta para llevar", "Pedir la cuenta igual", "Esperar").then(function (r) {
+        if (!r.ok) return;
+        paraLlevar = r.marcada;
+        abrir();
+      });
+    });
     dlgCuenta.addEventListener("click", function (e) {
       if (e.target === dlgCuenta) { dlgCuenta.close(); return; }
       var m = e.target.closest("[data-metodo]");
@@ -626,7 +678,7 @@
         var factura = leerFactura("#cuenta-factura");
         var problema = errorFactura(factura);
         if (problema) { avisar(problema); return; }
-        enviarJson(config.cuenta, { metodo: m.getAttribute("data-metodo"), factura: factura }, m);
+        enviarJson(config.cuenta, { metodo: m.getAttribute("data-metodo"), factura: factura, para_llevar: paraLlevar }, m);
         return;
       }
       if (e.target.closest("[data-cambiar-metodo]")) { eligiendo = true; mostrarPaso("cuenta-paso-metodo"); return; }

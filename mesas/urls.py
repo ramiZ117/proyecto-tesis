@@ -12,6 +12,7 @@ urlpatterns = [
     path("comanda/<int:pedido_id>/", views.comanda, name="comanda"),
     path("comanda/<int:pedido_id>/agregar/", views.agregar_item, name="agregar"),
     path("comanda/<int:pedido_id>/enviar/", views.enviar_cocina, name="enviar"),
+    path("comanda/<int:pedido_id>/entregar-todo/", views.entregar_todo, name="entregar_todo"),
     path("comanda/<int:pedido_id>/promocion/", views.agregar_promocion, name="agregar_promocion"),
     path("solicitud/<int:solicitud_id>/cargar/", views.cargar_solicitud, name="cargar_solicitud"),
     path("solicitud/<int:solicitud_id>/descartar/", views.descartar_solicitud, name="descartar_solicitud"),

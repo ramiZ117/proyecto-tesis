@@ -753,3 +753,22 @@ code { overflow-wrap: anywhere; word-break: break-word; }
 .pedido-linea > .btn, .pedido-linea form .btn { justify-content: center; white-space: normal; text-align: center; }
 dialog.confirmar.peligro .btn.peligro { background: var(--rojo-tinta); border-color: var(--rojo-tinta); color: #fff; }
 div:has(> .selector-forma) { grid-column: 1 / -1; }
+
+.entregar-todo { margin: 0 0 10px; }
+
+.monto-grande span { flex-shrink: 0; white-space: nowrap; }
+.monto-grande input { flex: 1; min-width: 0; width: 100%; }
+
+/* Finanzas */
+.resultados { margin: 0; display: grid; gap: 0; }
+.resultados > div { display: flex; justify-content: space-between; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--borde); }
+.resultados dt { font-weight: 600; }
+.resultados dd { margin: 0; font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.resultados .resta dd { color: var(--rojo-tinta); }
+.resultados .subtotal { background: var(--superficie-2); }
+.resultados .total { border-bottom: 0; margin-top: 6px; padding: 14px 12px; border-radius: 14px; background: var(--verde-100); color: var(--verde-800); font-size: 18px; }
+.resultados .total.perdida { background: var(--rojo-100); color: var(--rojo-tinta); }
+.gasto-fila { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--borde); }
+.gasto-fila:last-of-type { border-bottom: 0; }
+.gasto-fila.apagado { opacity: .55; }
+.gasto-acciones { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }

@@ -18,7 +18,7 @@ from django.views.decorators.http import require_POST
 from config.formato import num
 from config.permisos import requiere_admin
 from gestion.forms import (
-    AjustesLocalForm, CategoriaForm, InsumoForm, MesaForm, ProductoForm, PromocionForm, PromocionItemFormSet, ProveedorForm, RecetaFormSet,
+    AjustesLocalForm, CategoriaForm, GastoExtraordinarioForm, GastoFijoForm, InsumoForm, MesaForm, ProductoForm, PromocionForm, PromocionItemFormSet, ProveedorForm, RecetaFormSet,
 )
 from inventario.models import Categoria, Insumo, Producto, Promocion, Proveedor, Receta
 from inventario.servicios import disponibilidad_menu, registrar_entrada
@@ -255,3 +255,114 @@ def ajustes(request):
             return redirect("gestion:ajustes")
         messages.error(request, "Revisa los campos marcados.")
     return render(request, "gestion/ajustes.html", {"form": form, "ajustes": instancia})
+
+
+
+# ---- finanzas: ganancia real, inversión y gastos ---------------------------------------------
+MESES = ["", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre",
+         "octubre", "noviembre", "diciembre"]
+
+
+def _mes_pedido(request):
+    hoy = timezone.localdate()
+    texto = request.GET.get("mes", "")
+    try:
+        anio, mes = (int(x) for x in texto.split("-"))
+        if not (2000 <= anio <= hoy.year and 1 <= mes <= 12) or (anio, mes) > (hoy.year, hoy.month):
+            raise ValueError
+    except ValueError:
+        anio, mes = hoy.year, hoy.month
+    return anio, mes
+
+
+@requiere_admin
+def finanzas(request):
+    import csv
+
+    from django.http import HttpResponse
+
+    from gestion.finanzas import inversion_actual, rango_mes, rentabilidad_por_plato, resultado_mes
+    from gestion.models import GastoExtraordinario, GastoFijo
+
+    anio, mes = _mes_pedido(request)
+    resultado = resultado_mes(anio, mes)
+    _, _, desde, hasta = rango_mes(anio, mes)
+    platos = rentabilidad_por_plato(desde, hasta)
+    nombre_mes = f"{MESES[mes]} {anio}"
+    if request.GET.get("formato") == "csv":
+        respuesta = HttpResponse(content_type="text/csv; charset=utf-8")
+        respuesta["Content-Disposition"] = f'attachment; filename="resultado_{anio}_{mes:02d}.csv"'
+        respuesta.write("\ufeff")
+        e = csv.writer(respuesta, delimiter=";")
+        e.writerow([f"Estado de resultados · {nombre_mes}", "USD"])
+        for etiqueta, clave in (("Ventas sin IVA", "ventas"), ("Costo de lo vendido", "costo_ventas"),
+                                ("Ganancia bruta", "ganancia_bruta"), ("Mermas", "mermas"),
+                                ("Gastos fijos", "total_fijos"), ("Gastos extraordinarios (cuota del mes)", "total_extraordinarios"),
+                                ("Ganancia neta", "ganancia_neta")):
+            e.writerow([etiqueta, num(resultado[clave], 2)])
+        e.writerow([])
+        e.writerow(["Plato", "Unidades", "Ventas sin IVA", "Costo", "Ganancia", "Margen %"])
+        for f in platos:
+            e.writerow([f["producto"].nombre, f["unidades"], num(f["ventas"], 2), num(f["costo"], 2), num(f["ganancia"], 2),
+                        f["margen"] if f["margen"] is not None else ""])
+        return respuesta
+    hoy = timezone.localdate()
+    anterior = (anio, mes - 1) if mes > 1 else (anio - 1, 12)
+    siguiente = (anio, mes + 1) if mes < 12 else (anio + 1, 1)
+    return render(request, "gestion/finanzas.html", {
+        "r": resultado, "platos": platos, "inversion": inversion_actual(), "nombre_mes": nombre_mes,
+        "mes_valor": f"{anio}-{mes:02d}", "mes_max": f"{hoy.year}-{hoy.month:02d}",
+        "anterior": f"{anterior[0]}-{anterior[1]:02d}",
+        "siguiente": f"{siguiente[0]}-{siguiente[1]:02d}" if siguiente <= (hoy.year, hoy.month) else "",
+        "gastos_fijos": GastoFijo.objects.all(), "gastos_extra": GastoExtraordinario.objects.select_related("registrado_por")[:30],
+    })
+
+
+@requiere_admin
+def gasto_fijo(request, gasto_id=None):
+    from gestion.models import GastoFijo
+
+    instancia = get_object_or_404(GastoFijo, pk=gasto_id) if gasto_id else GastoFijo()
+    form = GastoFijoForm(request.POST or None, instance=instancia)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, f"Gasto fijo «{form.instance.nombre}» guardado.")
+        return redirect(reverse("gestion:finanzas") + "#gastos-fijos")
+    return render(request, "gestion/form_simple.html", {
+        "form": form, "titulo": instancia.nombre if instancia.pk else "Nuevo gasto fijo",
+        "volver": reverse("gestion:finanzas"),
+        "subtitulo": "Se descuenta cada mes de su vigencia. Para dejar de pagarlo, pon la fecha «Hasta».",
+    })
+
+
+@requiere_admin
+def gasto_extraordinario(request, gasto_id=None):
+    from gestion.models import GastoExtraordinario
+
+    instancia = get_object_or_404(GastoExtraordinario, pk=gasto_id) if gasto_id else GastoExtraordinario()
+    form = GastoExtraordinarioForm(request.POST or None, instance=instancia)
+    if request.method == "POST" and form.is_valid():
+        gasto = form.save(commit=False)
+        if not gasto.pk:
+            gasto.registrado_por = request.user
+        gasto.save()
+        messages.success(request, f"Gasto «{gasto.descripcion}» registrado.")
+        return redirect(reverse("gestion:finanzas") + "#gastos-extra")
+    return render(request, "gestion/form_simple.html", {
+        "form": form, "titulo": instancia.descripcion if instancia.pk else "Nuevo gasto extraordinario",
+        "volver": reverse("gestion:finanzas"),
+        "subtitulo": "Compras fuertes o puntuales: máquinas, reparaciones, remodelación…",
+    })
+
+
+@requiere_admin
+@require_POST
+def gasto_eliminar(request, tipo, gasto_id):
+    from gestion.models import GastoExtraordinario, GastoFijo
+
+    modelo = GastoFijo if tipo == "fijo" else GastoExtraordinario
+    gasto = get_object_or_404(modelo, pk=gasto_id)
+    nombre = str(gasto)
+    gasto.delete()
+    messages.success(request, f"Se eliminó «{nombre}».")
+    return redirect("gestion:finanzas")
