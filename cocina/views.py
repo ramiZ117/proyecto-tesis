@@ -1,12 +1,12 @@
 from django.conf import settings
 from django.contrib import messages
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from cocina.models import PedidoKDS
-from config.permisos import GRUPO_COCINA, requiere_grupo, texto_validacion
+from cocina.models import AREA_COCINA, AREA_SHAWARMA, AvisoCocina, PedidoKDS, filtro_area
+from config.permisos import GRUPO_COCINA, GRUPO_SHAWARMA, en_grupo, requiere_grupo, texto_validacion
 from inventario.models import Categoria, Insumo
 from inventario.servicios import estado_insumos
 from mesas.models import DetallePedido, Pedido
@@ -17,27 +17,51 @@ COLUMNAS = [
     ("listo", "Listos para servir", "Nada esperando al mesero."),
 ]
 
+# Cada área tiene su pantalla: la cocina (platos, entradas, jugos…) y el shawarmero (solo shawarmas).
+AREAS = {
+    AREA_COCINA: {"grupo": GRUPO_COCINA, "titulo": "Cocina", "vista": "cocina:kds", "parcial": "cocina:kds_parcial"},
+    AREA_SHAWARMA: {"grupo": GRUPO_SHAWARMA, "titulo": "Shawarmas", "vista": "cocina:shawarma",
+                    "parcial": "cocina:shawarma_parcial"},
+}
+ESTACIONES_COCINA = [(c, n) for c, n in Categoria.Estacion.choices if c != Categoria.Estacion.SHAWARMA]
 
-def _estacion(request) -> str:
-    valor = request.GET.get("estacion", "")
-    return valor if valor in Categoria.Estacion.values else ""
+
+def _area(valor) -> str:
+    return valor if valor in AREAS else AREA_COCINA
 
 
-def _contexto(request):
-    estacion = _estacion(request)
-    pedidos = PedidoKDS.objects.en_cola(estacion or None)
+def _exigir_area(user, area: str) -> None:
+    if not en_grupo(user, AREAS[area]["grupo"]):
+        raise PermissionDenied
+
+
+def _estacion(request, area: str) -> str:
+    valor = request.GET.get("estacion", "") or request.POST.get("estacion", "")
+    return valor if area == AREA_COCINA and valor in dict(ESTACIONES_COCINA) else ""
+
+
+def _destino(area: str, estacion: str = "") -> str:
+    return reverse(AREAS[area]["vista"]) + (f"?estacion={estacion}" if estacion else "")
+
+
+def _contexto(request, area: str):
+    estacion = _estacion(request, area)
+    pedidos = PedidoKDS.objects.en_cola(estacion or None, area=area)
     columnas = [
         {"clave": clave, "titulo": titulo, "vacio": vacio, "pedidos": [p for p in pedidos if p.etapa == clave]}
         for clave, titulo, vacio in COLUMNAS
     ]
-    parcial = reverse("cocina:kds_parcial") + (f"?estacion={estacion}" if estacion else "")
+    parcial = reverse(AREAS[area]["parcial"]) + (f"?estacion={estacion}" if estacion else "")
     return {
+        "area": area,
+        "titulo_area": AREAS[area]["titulo"],
         "pedidos": pedidos,
         "columnas": columnas,
         "estacion": estacion,
-        "estaciones": [("", "Todo")] + list(Categoria.Estacion.choices),
+        "estaciones": [("", "Todo")] + ESTACIONES_COCINA if area == AREA_COCINA else [],
         "url_parcial": parcial,
         "nuevos": sum(1 for p in pedidos if p.etapa == "pen"),
+        "avisos": list(AvisoCocina.pendientes(area).select_related("pedido")[:6]),
         "minutos_alerta": settings.KDS_MINUTOS_ALERTA,
         "minutos_critico": settings.KDS_MINUTOS_CRITICO,
     }
@@ -45,50 +69,31 @@ def _contexto(request):
 
 @requiere_grupo(GRUPO_COCINA)
 def kds(request):
-    return render(request, "cocina/kds.html", _contexto(request))
+    return render(request, "cocina/kds.html", _contexto(request, AREA_COCINA))
 
 
 @requiere_grupo(GRUPO_COCINA)
 def kds_parcial(request):
-    return render(request, "cocina/_tickets.html", _contexto(request))
+    return render(request, "cocina/_tickets.html", _contexto(request, AREA_COCINA))
 
 
-@requiere_grupo(GRUPO_COCINA)
+@requiere_grupo(GRUPO_SHAWARMA)
+def shawarma(request):
+    return render(request, "cocina/kds.html", _contexto(request, AREA_SHAWARMA))
+
+
+@requiere_grupo(GRUPO_SHAWARMA)
+def shawarma_parcial(request):
+    return render(request, "cocina/_tickets.html", _contexto(request, AREA_SHAWARMA))
+
+
+@requiere_grupo(GRUPO_COCINA, GRUPO_SHAWARMA)
 @require_POST
-def cambiar_estado(request, detalle_id):
-    detalle = get_object_or_404(DetallePedido.objects.select_related("producto"), pk=detalle_id)
-    accion = request.POST.get("accion")
-    try:
-        if accion == "preparar":
-            detalle.marcar_en_preparacion()
-            messages.success(request, f"{detalle.producto.nombre} en preparación.")
-            # El stock real baja al cobrar; la alerta usa lo disponible (stock menos lo ya pedido).
-            for insumo in estado_insumos(Insumo.objects.filter(recetas__producto=detalle.producto).distinct()):
-                if insumo.disponible < 0:
-                    messages.warning(
-                        request,
-                        f"Alerta: el stock registrado de {insumo.nombre} no cubre lo pedido "
-                        f"(hay {insumo.stock_actual} {insumo.get_unidad_display()}). Revisa el inventario.",
-                    )
-                elif insumo.critico:
-                    messages.warning(
-                        request,
-                        f"Alerta: {insumo.nombre} está en nivel crítico "
-                        f"({insumo.disponible} {insumo.get_unidad_display()} disponibles).",
-                    )
-        elif accion == "listo":
-            detalle.marcar_listo()
-            messages.success(request, f"{detalle.producto.nombre} listo para servir.")
-        else:
-            messages.error(request, "Acción de cocina no válida.")
-    except ValidationError as exc:
-        messages.error(request, texto_validacion(exc))
-    destino = reverse("cocina:kds")
-    estacion = request.POST.get("estacion", "")
-    if estacion in Categoria.Estacion.values:
-        destino += f"?estacion={estacion}"
-    return redirect(destino)
-
+def atender_aviso(request, aviso_id):
+    aviso = get_object_or_404(AvisoCocina, pk=aviso_id)
+    _exigir_area(request.user, aviso.area)
+    aviso.atender(request.user)
+    return redirect(_destino(aviso.area, _estacion(request, aviso.area)))
 
 
 def _alertas_de_stock(request, productos) -> None:
@@ -104,18 +109,44 @@ def _alertas_de_stock(request, productos) -> None:
             messages.warning(request, f"Alerta: {insumo.nombre} está en nivel crítico. Avisa a caja para reponer.")
 
 
-@requiere_grupo(GRUPO_COCINA)
+@requiere_grupo(GRUPO_COCINA, GRUPO_SHAWARMA)
+@require_POST
+def cambiar_estado(request, detalle_id):
+    """Avance de un solo plato (se conserva para compatibilidad; la pantalla usa un botón por pedido)."""
+    detalle = get_object_or_404(DetallePedido.objects.select_related("producto__categoria"), pk=detalle_id)
+    area = AREA_SHAWARMA if detalle.producto.area == AREA_SHAWARMA else AREA_COCINA
+    _exigir_area(request.user, area)
+    accion = request.POST.get("accion")
+    try:
+        if accion == "preparar":
+            detalle.marcar_en_preparacion()
+            messages.success(request, f"{detalle.producto.nombre} en preparación.")
+            _alertas_de_stock(request, [detalle.producto_id])
+        elif accion == "listo":
+            detalle.marcar_listo()
+            messages.success(request, f"{detalle.producto.nombre} listo para servir.")
+        else:
+            messages.error(request, "Acción de cocina no válida.")
+    except ValidationError as exc:
+        messages.error(request, texto_validacion(exc))
+    return redirect(_destino(area, _estacion(request, area)))
+
+
+@requiere_grupo(GRUPO_COCINA, GRUPO_SHAWARMA)
 @require_POST
 def avanzar_pedido(request, pedido_id):
-    """Un solo botón por mesa: «Empezar» pasa todos sus platos nuevos a preparación y «Listo» los termina.
+    """Un solo botón por pedido: «Empezar» pasa sus platos nuevos a preparación y «Listo» los termina.
 
-    Si la pantalla está filtrada por estación, solo avanza los platos de esa estación.
+    Solo toca los platos del área de quien lo pulsa (la cocina no mueve los shawarmas ni al revés) y,
+    si la pantalla está filtrada por estación, solo los de esa estación.
     """
+    area = _area(request.POST.get("area"))
+    _exigir_area(request.user, area)
     pedido = get_object_or_404(Pedido, pk=pedido_id)
     accion = request.POST.get("accion")
-    estacion = request.POST.get("estacion", "")
-    platos = pedido.detalles.filter(enviado=True).select_related("producto")
-    if estacion in Categoria.Estacion.values:
+    estacion = _estacion(request, area)
+    platos = pedido.detalles.filter(enviado=True).filter(filtro_area(area)).select_related("producto")
+    if estacion:
         platos = platos.filter(producto__categoria__estacion=estacion)
     try:
         if accion == "empezar":
@@ -137,7 +168,4 @@ def avanzar_pedido(request, pedido_id):
             messages.error(request, "Acción de cocina no válida.")
     except ValidationError as exc:
         messages.error(request, texto_validacion(exc))
-    destino = reverse("cocina:kds")
-    if estacion in Categoria.Estacion.values:
-        destino += f"?estacion={estacion}"
-    return redirect(destino)
+    return redirect(_destino(area, estacion))

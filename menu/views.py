@@ -413,17 +413,17 @@ def reportar_pago(request):
     solicitud = SolicitudCuenta.activa_de(pedido) if pedido else None
     if solicitud is None:
         return JsonResponse({"error": "Primero pide la cuenta."}, status=409)
-    referencia, origen = datos.get("referencia"), datos.get("origen") or ""
+    referencia, origen, telefono = datos.get("referencia"), datos.get("origen") or "", datos.get("telefono") or ""
     try:
         propina = Decimal(str(datos.get("propina") or "0").replace(",", "."))
         if not propina.is_finite():
             raise InvalidOperation
     except (InvalidOperation, ValueError):
         return JsonResponse({"error": "La propina no es un monto válido."}, status=400)
-    if not isinstance(referencia, str) or not isinstance(origen, str):
+    if not isinstance(referencia, str) or not isinstance(origen, str) or not isinstance(telefono, str):
         return JsonResponse({"error": "Escribe la referencia del pago."}, status=400)
     try:
-        solicitud.reportar(referencia, origen, propina)
+        solicitud.reportar(referencia, origen, propina, telefono=telefono)
     except ValidationError as exc:
         return JsonResponse({"error": " ".join(exc.messages)}, status=400)
     registro.info("Mesa %s reporta pago %s ref %s", mesa.numero, solicitud.metodo, solicitud.referencia)
@@ -648,8 +648,10 @@ def _minutos_pedido(pedido):
 
 
 def _minutos_items(items: list[dict]) -> list[int]:
-    productos = {p.pk: p.minutos_preparacion for p in Producto.objects.filter(pk__in=[i["id"] for i in items if i["tipo"] == "producto"])}
-    minutos = [productos.get(i["id"], 10) for i in items if i["tipo"] == "producto"]
+    # Las bebidas de nevera no pasan por cocina: no suman espera.
+    productos = {p.pk: p for p in Producto.objects.filter(pk__in=[i["id"] for i in items if i["tipo"] == "producto"])}
+    minutos = [productos[i["id"]].minutos_preparacion for i in items
+               if i["tipo"] == "producto" and i["id"] in productos and productos[i["id"]].bebida != "NEV"]
     for promo in Promocion.objects.filter(pk__in=[i["id"] for i in items if i["tipo"] == "promocion"]).prefetch_related("items__producto"):
-        minutos += [pi.producto.minutos_preparacion for pi in promo.items.all()]
+        minutos += [pi.producto.minutos_preparacion for pi in promo.items.all() if pi.producto.bebida != "NEV"]
     return minutos

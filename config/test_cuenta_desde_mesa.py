@@ -122,8 +122,14 @@ class CuentaDesdeLaMesaTests(_Base):
         self.assertEqual(cuenta["solicitud"]["monto"], "440.00")
         self.assertEqual(self.post("/menu/cuenta/reportar/", referencia="12", propina="0").status_code, 400)
         self.assertEqual(self.post("/menu/cuenta/reportar/", referencia="00451234", propina="9999").status_code, 400)
+        # con pago móvil el teléfono desde el que pagó es obligatorio (así caja ubica el pago)
         r = self.post("/menu/cuenta/reportar/", referencia="00451234", origen="Mercantil", propina="44")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("teléfono", r.json()["error"])
+        self.assertEqual(self.post("/menu/cuenta/reportar/", referencia="00451234", telefono="12345", propina="44").status_code, 400)
+        r = self.post("/menu/cuenta/reportar/", referencia="00451234", telefono="04141234567", origen="Mercantil", propina="44")
         self.assertEqual(r.json()["cuenta"]["solicitud"]["estado"], "REP")
+        self.assertEqual(SolicitudCuenta.objects.get().origen, "Tel. 0414-1234567 · Mercantil")
 
         caja = self.cliente(self.cajero)
         self.assertContains(caja.get("/caja/"), "reportado · por confirmar")
@@ -170,7 +176,7 @@ class CuentaDesdeLaMesaTests(_Base):
         self.post("/menu/cuenta/", metodo="EFE")
         self.post("/menu/cuenta/", metodo="PMO")
         self.assertEqual(SolicitudCuenta.objects.get().metodo, "PMO")
-        self.post("/menu/cuenta/reportar/", referencia="99887766")
+        self.post("/menu/cuenta/reportar/", referencia="99887766", telefono="0424-7654321")
         self.assertEqual(self.post("/menu/cuenta/", metodo="EFE").status_code, 409)
 
     def test_platos_sin_enviar_piden_llamar_al_mesero(self):

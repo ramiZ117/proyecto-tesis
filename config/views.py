@@ -13,6 +13,7 @@ from config.permisos import (
     GRUPO_CAJA,
     GRUPO_COCINA,
     GRUPO_MESERO,
+    GRUPO_SHAWARMA,
     ROLES,
     es_admin,
     nombres_grupos,
@@ -68,6 +69,8 @@ def inicio(request):
     grupos = nombres_grupos(user)
     if grupos == {GRUPO_COCINA}:
         return redirect("cocina:kds")
+    if grupos == {GRUPO_SHAWARMA}:
+        return redirect("cocina:shawarma")
     if grupos == {GRUPO_CAJA}:
         return redirect("caja:cuentas")
     if grupos == {GRUPO_MESERO}:

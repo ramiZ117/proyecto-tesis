@@ -6,16 +6,18 @@ from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Prefetch
-from django.http import HttpResponse
+from django.db.models import Count, Max, Prefetch, Q
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
-from caja.correo import enviar_en_segundo_plano, enviar_factura
-from caja.models import CierreCaja, Factura, Pago, Propina, SolicitudCuenta, TasaCambio, datos_cliente_validos
+from caja.correo import cierre_en_segundo_plano, destinos_cierre, enviar_cierre, enviar_en_segundo_plano, enviar_factura
+from caja.models import (CierreCaja, ClienteFiscal, Factura, Pago, Propina, SolicitudCuenta, TasaCambio,
+                         datos_cliente_validos)
+from caja.ticket import ticket_cierre, ticket_factura
 from config.formato import num
 from config.permisos import GRUPO_CAJA, GRUPO_MESERO, en_grupo, es_admin, requiere_grupo, texto_validacion
 from mesas.models import DetallePedido, Mesa, Pedido, PedidoEnLinea
@@ -170,6 +172,7 @@ def factura_detalle(request, factura_id):
     ]
     contexto["cuenta_cliente"] = SolicitudCuenta.activa_de(factura.pedido)
     contexto["detalles_vigentes"] = [d for d in factura.pedido.detalles.all() if d.estado != DetallePedido.Estado.ANULADO]
+    contexto["ticket"] = ticket_factura(factura, contexto["detalles_vigentes"])
     contexto["propinas"] = list(factura.propinas.all())
     return render(request, "caja/factura.html", contexto)
 
@@ -416,7 +419,11 @@ def cierre(request):
 def generar_cierre(request):
     try:
         cierre_caja = CierreCaja.generar(request.user)
-        messages.success(request, f"Cierre de caja generado: {cierre_caja.cantidad_facturas} facturas cobradas.")
+        destinos = destinos_cierre()
+        cierre_en_segundo_plano(cierre_caja)
+        envio = f" La nota se está enviando a {', '.join(destinos)}." if destinos else ""
+        messages.success(request, f"Cierre de caja generado: {cierre_caja.cantidad_facturas} factura{'s' if cierre_caja.cantidad_facturas != 1 else ''} cobrada{'s' if cierre_caja.cantidad_facturas != 1 else ''}. "
+                                  f"Imprime la nota de cierre o envíala por correo.{envio}")
         return redirect("caja:cierre_detalle", cierre_id=cierre_caja.pk)
     except ValidationError as exc:
         messages.error(request, texto_validacion(exc))
@@ -442,7 +449,32 @@ def _cierre_visible(request, cierre_id):
 def cierre_detalle(request, cierre_id):
     cierre_caja = _cierre_visible(request, cierre_id)
     datos = cierre_caja.datos_guardados()
-    return render(request, "caja/cierre_detalle.html", {"cierre": cierre_caja, "datos": datos})
+    return render(request, "caja/cierre_detalle.html", {
+        "cierre": cierre_caja, "datos": datos, "nota": ticket_cierre(cierre_caja, datos),
+        "destinos": ", ".join(destinos_cierre()),
+    })
+
+
+@requiere_grupo(GRUPO_CAJA)
+@require_POST
+def cierre_correo(request, cierre_id):
+    """Envía la nota de cierre a uno o varios correos (separados por coma)."""
+    from django.core.validators import validate_email
+
+    cierre_caja = _cierre_visible(request, cierre_id)
+    destinos = [c.strip() for c in (request.POST.get("correos") or "").replace(";", ",").split(",") if c.strip()]
+    if not destinos or len(destinos) > 5:
+        messages.error(request, "Escribe entre uno y cinco correos, separados por coma.")
+        return redirect("caja:cierre_detalle", cierre_id=cierre_caja.pk)
+    for correo in destinos:
+        try:
+            validate_email(correo)
+        except ValidationError:
+            messages.error(request, f"El correo «{correo[:60]}» no es válido.")
+            return redirect("caja:cierre_detalle", cierre_id=cierre_caja.pk)
+    enviado, texto = enviar_cierre(cierre_caja, destinos)
+    (messages.success if enviado else messages.error)(request, texto)
+    return redirect("caja:cierre_detalle", cierre_id=cierre_caja.pk)
 
 
 @requiere_grupo(GRUPO_CAJA)
@@ -678,3 +710,66 @@ def llevar(request):
     for p in pedidos:
         p.factura_vigente = p.factura_activa
     return render(request, "caja/llevar.html", {"llevar": pedidos})
+
+
+# ---- clientes que piden factura con sus datos -------------------------------------------------
+def _buscar_clientes(texto: str):
+    texto = " ".join((texto or "").split())[:60]
+    if len(texto) < 2:
+        return ClienteFiscal.objects.none()
+    digitos = "".join(c for c in texto if c.isdigit())
+    filtro = Q(nombre__icontains=texto) | Q(documento__icontains=texto.upper().replace(" ", ""))
+    if len(digitos) >= 3:
+        filtro |= Q(documento__contains=digitos)
+    return ClienteFiscal.objects.filter(filtro)
+
+
+@requiere_grupo(GRUPO_CAJA)
+def cliente_buscar(request):
+    """Sugerencias para la factura personalizada: por cédula/RIF (o parte) o por nombre."""
+    clientes = _buscar_clientes(request.GET.get("q", ""))[:8]
+    return JsonResponse({"clientes": [c.como_datos() for c in clientes]})
+
+
+@requiere_grupo(GRUPO_CAJA)
+def clientes(request):
+    q = (request.GET.get("q") or "").strip()
+    lista = _buscar_clientes(q) if q else ClienteFiscal.objects.all()
+    lista = list(lista.order_by("nombre")[:300])
+    resumen = {
+        fila["cliente_documento"]: fila
+        for fila in Factura.objects.exclude(estado=Factura.Estado.ANULADA)
+        .filter(cliente_documento__in=[c.documento for c in lista])
+        .values("cliente_documento").annotate(facturas=Count("pk"), ultima=Max("emitida_en"))
+    }
+    for c in lista:
+        fila = resumen.get(c.documento, {})
+        c.facturas, c.ultima = fila.get("facturas", 0), fila.get("ultima")
+    return render(request, "caja/clientes.html", {"clientes": lista, "q": q})
+
+
+@requiere_grupo(GRUPO_CAJA)
+def cliente_editar(request, cliente_id):
+    cliente = get_object_or_404(ClienteFiscal, pk=cliente_id)
+    error = ""
+    if request.method == "POST":
+        if request.POST.get("accion") == "borrar":
+            if not es_admin(request.user):
+                raise PermissionDenied
+            cliente.delete()
+            messages.success(request, f"Se borró a {cliente.nombre} de los clientes guardados (sus facturas no cambian).")
+            return redirect("caja:clientes")
+        datos, error = datos_cliente_validos(request.POST)
+        if not error:
+            otro = ClienteFiscal.objects.filter(documento=datos["documento"]).exclude(pk=cliente.pk).exists()
+            if otro:
+                error = "Ya hay otro cliente guardado con esa cédula o RIF."
+            else:
+                for campo in ClienteFiscal.CAMPOS:
+                    setattr(cliente, campo, datos[campo])
+                cliente.save()
+                messages.success(request, f"Datos de {cliente.nombre} actualizados.")
+                return redirect("caja:clientes")
+        if error:
+            messages.error(request, error)
+    return render(request, "caja/cliente.html", {"cliente": cliente})

@@ -9,7 +9,7 @@ from django.core.management.base import BaseCommand
 from django.utils.text import slugify
 
 from caja.models import TasaCambio
-from config.permisos import GRUPO_ADMIN, GRUPO_CAJA, GRUPO_COCINA, GRUPO_MESERO
+from config.permisos import GRUPO_ADMIN, GRUPO_CAJA, GRUPO_COCINA, GRUPO_MESERO, GRUPO_SHAWARMA
 from inventario.models import Categoria, Insumo, Producto, Promocion, PromocionItem, Proveedor, Receta
 from mesas.models import Mesa
 
@@ -17,6 +17,8 @@ CLAVE_DEMO = "tesis1234"
 TASA_USD_A_LOCAL = Decimal("40.0000")
 USUARIOS_ANTIGUOS = ("mesero", "cocinero", "cajero")
 
+
+BEBIDAS_DE_NEVERA = ["Refresco"]
 
 # Personalizaciones por categoría y minutos de preparación (por plato o por categoría).
 OPCIONES = {
@@ -56,12 +58,13 @@ class Command(BaseCommand):
         self.reset_stock = options["reset_stock"]
         grupos = {
             nombre: Group.objects.get_or_create(name=nombre)[0]
-            for nombre in (GRUPO_ADMIN, GRUPO_MESERO, GRUPO_COCINA, GRUPO_CAJA)
+            for nombre in (GRUPO_ADMIN, GRUPO_MESERO, GRUPO_COCINA, GRUPO_CAJA, GRUPO_SHAWARMA)
         }
 
         usuarios = [
             ("mesero1", GRUPO_MESERO),
             ("chef1", GRUPO_COCINA),
+            ("shawarmero1", GRUPO_SHAWARMA),
             ("cajero1", GRUPO_CAJA),
             ("admin", GRUPO_ADMIN),
         ]
@@ -97,7 +100,7 @@ class Command(BaseCommand):
         insumos = self._insumos(proveedores)
         self._carta(insumos)
         self._promociones()
-        self.stdout.write(self.style.SUCCESS("Carga inicial lista. Usuarios: mesero1, chef1, cajero1 y admin."))
+        self.stdout.write(self.style.SUCCESS("Carga inicial lista. Usuarios: mesero1, chef1, shawarmero1, cajero1 y admin."))
 
     # ---- salón -------------------------------------------------------------------
     def _mesas(self):
@@ -178,7 +181,7 @@ class Command(BaseCommand):
     def _carta(self, i):
         E = Categoria.Estacion
         categorias = {}
-        definicion = [("Shawarmas", E.PARRILLA), ("Platos", E.PARRILLA), ("Entradas frías", E.FRIOS),
+        definicion = [("Shawarmas", E.SHAWARMA), ("Platos", E.PARRILLA), ("Entradas frías", E.FRIOS),
                       ("Postres", E.FRIOS), ("Bebidas", E.BEBIDAS)]
         for orden, (nombre, estacion) in enumerate(definicion, start=1):
             categorias[nombre], _ = Categoria.objects.update_or_create(
@@ -265,6 +268,10 @@ class Command(BaseCommand):
             con_foto += bool(prod.foto)
             vigentes.append(prod.pk)
         Producto.objects.exclude(pk__in=vigentes).update(disponible=False)
+        # Bebidas: las de nevera las entrega el mesero; las demás se preparan en cocina.
+        bebidas = Producto.objects.filter(categoria=categorias["Bebidas"])
+        bebidas.filter(nombre__in=BEBIDAS_DE_NEVERA).update(bebida=Producto.Bebida.NEVERA)
+        bebidas.exclude(nombre__in=BEBIDAS_DE_NEVERA).update(bebida=Producto.Bebida.COCINA)
         self.stdout.write(f"  Carta árabe: {len(carta)} platos en {len(categorias)} categorías, con recetas ({con_foto} con foto).")
 
     def _promociones(self):

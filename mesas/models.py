@@ -269,7 +269,12 @@ class Pedido(models.Model):
         if not nuevos.exists():
             raise ValidationError("No hay platillos nuevos para enviar a cocina.")
         ahora = timezone.now()
+        ids = list(nuevos.values_list("pk", flat=True))
         nuevos.update(enviado=True, enviado_en=ahora)
+        # Las bebidas de nevera no pasan por cocina: quedan listas para que el mesero las lleve.
+        DetallePedido.objects.filter(pk__in=ids, producto__bebida="NEV").update(
+            estado=DetallePedido.Estado.LISTO, preparacion_en=ahora, listo_en=ahora
+        )
         if not self.enviado_cocina_en:
             self.enviado_cocina_en = ahora
             self.save(update_fields=["enviado_cocina_en", "actualizado_en"])
@@ -299,7 +304,7 @@ class Pedido(models.Model):
             raise ValidationError("El pedido tiene una factura vigente; anúlala primero en caja.")
         en_marcha = self.detalles.filter(
             estado__in=[DetallePedido.Estado.EN_PREPARACION, DetallePedido.Estado.LISTO, DetallePedido.Estado.ENTREGADO]
-        )
+        ).exclude(estado=DetallePedido.Estado.LISTO, producto__bebida="NEV")  # la bebida sin entregar vuelve a la nevera
         if en_marcha.exists() and not forzar:
             raise ValidationError(
                 "Ya hay platillos en preparación o servidos. Solo un administrador puede anular este pedido."
@@ -313,7 +318,12 @@ class Pedido(models.Model):
                 tipo=MovimientoStock.Tipo.MERMA,
                 motivo=MovimientoStock.Motivo.ANULACION,
             )
-        self.detalles.exclude(estado=DetallePedido.Estado.ANULADO).update(estado=DetallePedido.Estado.ANULADO)
+        from cocina.models import AvisoCocina
+
+        AvisoCocina.por_anulacion(self, list(self.detalles.select_related("producto__categoria")), todo=True)
+        self.detalles.exclude(estado=DetallePedido.Estado.ANULADO).update(
+            estado=DetallePedido.Estado.ANULADO, actualizado_en=timezone.now()
+        )
         self.estado = self.Estado.ANULADO
         self.cerrado_en = timezone.now()
         self.save(update_fields=["estado", "cerrado_en", "actualizado_en"])
@@ -421,14 +431,24 @@ class DetallePedido(models.Model):
         self.cantidad = nueva
         self.save(update_fields=["cantidad", "actualizado_en"])
 
+    @property
+    def se_puede_quitar(self) -> bool:
+        """Lo que cocina no empezó; una bebida de nevera se puede quitar mientras no se haya entregado."""
+        if self.estado == self.Estado.PENDIENTE:
+            return True
+        return self.estado == self.Estado.LISTO and self.producto.bebida == "NEV"
+
     def cancelar(self) -> None:
         """Quita el platillo mientras cocina no lo haya empezado (una promoción se quita completa)."""
         self.pedido._exigir_abierto()
         if self.promo_grupo:
             grupo = list(self.pedido.detalles.filter(promo_grupo=self.promo_grupo).exclude(estado=self.Estado.ANULADO))
-            if any(d.estado != self.Estado.PENDIENTE for d in grupo):
+            if not all(d.se_puede_quitar for d in grupo):
                 raise ValidationError("Cocina ya empezó parte de esta promoción: no se puede quitar.")
             with transaction.atomic():
+                from cocina.models import AvisoCocina
+
+                AvisoCocina.por_anulacion(self.pedido, grupo)
                 for d in grupo:
                     if d.enviado:
                         d.estado = self.Estado.ANULADO
@@ -437,11 +457,14 @@ class DetallePedido(models.Model):
                         d.delete()
                 self.pedido.sincronizar_estado_desde_detalles()
             return
-        if self.estado != self.Estado.PENDIENTE:
+        if not self.se_puede_quitar:
             raise ValidationError("Solo se pueden quitar platillos que cocina aún no empezó a preparar.")
         if not self.enviado:
             self.delete()
             return
+        from cocina.models import AvisoCocina
+
+        AvisoCocina.por_anulacion(self.pedido, [self])
         self.estado = self.Estado.ANULADO
         self.save(update_fields=["estado", "actualizado_en"])
         self.pedido.sincronizar_estado_desde_detalles()

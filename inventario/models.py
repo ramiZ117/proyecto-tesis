@@ -11,6 +11,7 @@ class Categoria(models.Model):
         PARRILLA = "PAR", "Parrilla"
         FRIOS = "FRI", "Fríos"
         BEBIDAS = "BEB", "Bebidas"
+        SHAWARMA = "SHA", "Shawarmero"
 
     nombre = models.CharField(max_length=80, unique=True)
     activa = models.BooleanField(default=True)
@@ -18,7 +19,8 @@ class Categoria(models.Model):
         max_length=3,
         choices=Estacion.choices,
         default=Estacion.PARRILLA,
-        help_text="Estación de cocina que prepara los platos de esta categoría (filtro del monitor).",
+        help_text="Quién prepara los platos de esta categoría. «Shawarmero» los envía a la pantalla del shawarmero "
+                  "y no a la cocina; las demás estaciones van a la cocina (y sirven de filtro en su monitor).",
     )
     orden = models.PositiveSmallIntegerField(default=0, help_text="Orden en la carta (menor primero).")
 
@@ -135,6 +137,16 @@ class Producto(models.Model):
         default=10, validators=[MinValueValidator(1)],
         help_text="Tiempo promedio en cocina; con él se estima la espera del cliente.",
     )
+    class Bebida(models.TextChoices):
+        NO = "", "No es bebida"
+        COCINA = "COC", "Bebida preparada en cocina (jugos, café, té…)"
+        NEVERA = "NEV", "Bebida de nevera (la entrega el mesero)"
+
+    bebida = models.CharField(
+        max_length=3, choices=Bebida.choices, default=Bebida.NO, blank=True,
+        help_text="Las bebidas de nevera no pasan por la cocina: al enviar la comanda quedan listas para que el "
+                  "mesero las lleve. Las preparadas en cocina llegan a la cocina como un plato más.",
+    )
     vegetariano = models.BooleanField(default=False)
     picante = models.BooleanField(default=False)
     sin_gluten = models.BooleanField(default=False)
@@ -159,6 +171,17 @@ class Producto(models.Model):
 
     def __str__(self) -> str:
         return self.nombre
+
+    # Áreas de preparación: adónde llega el plato al enviar la comanda.
+    AREA_COCINA, AREA_SHAWARMA, AREA_NEVERA = "COC", "SHA", "NEV"
+
+    @property
+    def area(self) -> str:
+        if self.bebida == self.Bebida.NEVERA:
+            return self.AREA_NEVERA
+        if self.categoria.estacion == Categoria.Estacion.SHAWARMA:
+            return self.AREA_SHAWARMA
+        return self.AREA_COCINA
 
     @property
     def etiquetas(self) -> list[str]:
@@ -276,10 +299,6 @@ class MovimientoStock(models.Model):
     @property
     def es_ingreso(self) -> bool:
         return self.variacion > 0
-
-    @property
-    def valor_usd(self) -> Decimal:
-        return (self.cantidad * self.costo_unitario).quantize(Decimal("0.01"))
 
     @property
     def valor_usd(self) -> Decimal:

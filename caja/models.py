@@ -64,6 +64,40 @@ class TasaCambio(models.Model):
         return _redondear(monto_usd * self.valor)
 
 
+class ClienteFiscal(models.Model):
+    """Cliente que pidió factura con sus datos: se guarda para no volver a escribirlos en su próxima visita."""
+
+    documento = models.CharField(max_length=20, unique=True, help_text="Cédula o RIF (V-12345678, J-123456789…).")
+    nombre = models.CharField(max_length=120, help_text="Nombre o razón social.")
+    direccion = models.CharField(max_length=200, help_text="Dirección fiscal.")
+    telefono = models.CharField(max_length=20, blank=True)
+    correo = models.EmailField(blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "cliente"
+        verbose_name_plural = "clientes"
+        ordering = ["nombre"]
+
+    def __str__(self) -> str:
+        return f"{self.nombre} · {self.documento}"
+
+    CAMPOS = ("nombre", "documento", "direccion", "telefono", "correo")
+
+    @classmethod
+    def recordar(cls, datos: dict) -> "ClienteFiscal":
+        """Guarda o actualiza el cliente con los datos ya validados (`datos_cliente_validos`)."""
+        cliente, _ = cls.objects.update_or_create(
+            documento=datos["documento"],
+            defaults={c: datos.get(c, "") for c in cls.CAMPOS if c != "documento"},
+        )
+        return cliente
+
+    def como_datos(self) -> dict:
+        return {c: getattr(self, c) for c in self.CAMPOS}
+
+
 class Factura(models.Model):
     class Estado(models.TextChoices):
         ABIERTA = "ABI", "Abierta"
@@ -156,6 +190,8 @@ class Factura(models.Model):
             setattr(self, f"cliente_{campo}", datos.get(campo, ""))
         self.save(update_fields=["cliente_nombre", "cliente_documento", "cliente_direccion", "cliente_telefono",
                                  "cliente_correo"])
+        if datos.get("documento"):
+            ClienteFiscal.recordar(datos)  # queda guardado para la próxima visita
 
     @classmethod
     @transaction.atomic
@@ -748,6 +784,9 @@ class CierreCaja(models.Model):
     desglose = models.JSONField(default=dict, blank=True)
     cerrado_en = models.DateTimeField(auto_now_add=True)
     observaciones = models.TextField(blank=True)
+    correo_enviado_a = models.CharField(max_length=300, blank=True)
+    correo_enviado_en = models.DateTimeField(null=True, blank=True)
+    correo_error = models.CharField(max_length=200, blank=True)
 
     class Meta:
         verbose_name = "cierre de caja"
@@ -1116,7 +1155,9 @@ class SolicitudCuenta(models.Model):
         return solicitud
 
     @transaction.atomic
-    def reportar(self, referencia: str, origen: str = "", propina: Decimal = Decimal("0.00")) -> None:
+    def reportar(self, referencia: str, origen: str = "", propina: Decimal = Decimal("0.00"), telefono: str = "") -> None:
+        """El cliente avisa que pagó. Con pago móvil debe dar el teléfono desde el que pagó (así caja lo ubica)."""
+        import re
         solicitud = SolicitudCuenta.objects.select_for_update().get(pk=self.pk)
         if not solicitud.es_digital:
             raise ValidationError("Con este método se paga en caja.")
@@ -1128,7 +1169,15 @@ class SolicitudCuenta(models.Model):
         propina = _redondear(propina or Decimal("0.00"))
         if propina < 0 or propina > solicitud.monto:
             raise ValidationError("La propina debe ser un monto entre cero y el total de la cuenta.")
-        solicitud.referencia, solicitud.origen = referencia, " ".join((origen or "").split())[:80]
+        origen = " ".join((origen or "").split())[:60]
+        if solicitud.metodo == Pago.Metodo.PAGO_MOVIL:
+            telefono = re.sub(r"[\s-]", "", telefono or "")
+            if not re.fullmatch(r"(\+?58)?0?4\d{9}", telefono):
+                raise ValidationError("Escribe el teléfono desde el que hiciste el pago móvil (ej.: 0414-1234567).")
+            digitos = telefono[-10:]
+            telefono = f"0{digitos[:3]}-{digitos[3:]}"
+            origen = f"Tel. {telefono}" + (f" · {origen}" if origen else "")
+        solicitud.referencia, solicitud.origen = referencia, origen[:80]
         solicitud.propina = propina
         solicitud.estado = self.Estado.REPORTADA
         solicitud.save(update_fields=["referencia", "origen", "propina", "estado", "actualizada_en"])

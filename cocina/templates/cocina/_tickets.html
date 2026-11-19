@@ -1,3 +1,17 @@
+{% if avisos %}
+<div class="kds-avisos" role="alert" data-aviso-ultimo="{{ avisos.0.pk }}">
+  {% for aviso in avisos %}
+    <div class="kds-aviso">
+      {% include "_icono.html" with nombre="alerta" %}
+      <div><strong>{{ aviso.texto }}</strong><small>{{ aviso.creado_en|date:"H:i" }} · no lo prepares (o apártalo si ya empezó)</small></div>
+      <form method="post" action="{% url 'cocina:aviso' aviso.pk %}">
+        {% csrf_token %}{% if estacion %}<input type="hidden" name="estacion" value="{{ estacion }}">{% endif %}
+        <button class="accion-kds" type="submit">Entendido</button>
+      </form>
+    </div>
+  {% endfor %}
+</div>
+{% else %}<div hidden data-aviso-ultimo="0"></div>{% endif %}
 <div class="kds-columnas" data-nuevos="{{ nuevos }}">
   {% for col in columnas %}
     <section class="kds-columna" aria-label="{{ col.titulo }}">
@@ -34,6 +48,7 @@
           {% if pedido.por_empezar or pedido.en_marcha %}
             <form method="post" action="{% url 'cocina:avanzar' pedido.pk %}">
               {% csrf_token %}
+              <input type="hidden" name="area" value="{{ area }}">
               {% if estacion %}<input type="hidden" name="estacion" value="{{ estacion }}">{% endif %}
               {% if pedido.por_empezar %}
                 <button class="accion-kds empezar bloque" name="accion" value="empezar" type="submit">Empezar {% if pedido.por_empezar > 1 %}({{ pedido.por_empezar }} platos){% endif %}</button>

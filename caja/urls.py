@@ -32,5 +32,9 @@ urlpatterns = [
     path("cierre/historial/", views.historial, name="historial"),
     path("cierre/<int:cierre_id>/", views.cierre_detalle, name="cierre_detalle"),
     path("cierre/<int:cierre_id>/csv/", views.cierre_csv, name="cierre_csv"),
+    path("cierre/<int:cierre_id>/correo/", views.cierre_correo, name="cierre_correo"),
+    path("clientes/", views.clientes, name="clientes"),
+    path("clientes/buscar/", views.cliente_buscar, name="cliente_buscar"),
+    path("clientes/<int:cliente_id>/", views.cliente_editar, name="cliente_editar"),
     path("reporte/", views.reporte_dia, name="reporte"),
 ]

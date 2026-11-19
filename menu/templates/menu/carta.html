@@ -349,8 +349,13 @@
           <button type="button" class="copiar" id="copiar-monto">Copiar monto</button>
           <label for="pago-referencia" class="etiqueta-campo">Número de referencia</label>
           <input id="pago-referencia" maxlength="60" inputmode="text" autocomplete="off" placeholder="Ej.: 004512345678">
-          <label for="pago-origen" class="etiqueta-campo">Banco o teléfono desde el que pagaste <span class="muted">(opcional)</span></label>
-          <input id="pago-origen" maxlength="80" autocomplete="off">
+          <div id="campo-pago-telefono" hidden>
+            <label for="pago-telefono" class="etiqueta-campo">Teléfono desde el que pagaste *</label>
+            <input id="pago-telefono" maxlength="20" inputmode="tel" autocomplete="tel" placeholder="0414-1234567">
+            <p class="muted ayuda-campo">Con él, caja ubica tu pago móvil en el banco.</p>
+          </div>
+          <label for="pago-origen" class="etiqueta-campo" id="etiqueta-pago-origen">Banco desde el que pagaste <span class="muted">(opcional)</span></label>
+          <input id="pago-origen" maxlength="60" autocomplete="off">
           <button class="boton-ia" type="button" id="reportar-pago">Ya pagué, avisar a caja</button>
           <button class="enlace-cambiar" type="button" data-cambiar-metodo>Cambiar método de pago</button>
         </div>

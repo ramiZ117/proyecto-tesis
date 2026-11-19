@@ -123,12 +123,13 @@
         {% elif d.estado == "PEN" %}<span class="pill cola">En cola</span>
         {% elif d.estado == "PRE" %}<span class="pill prep">Preparando</span>
         {% elif d.estado == "LIS" %}
+          {% if d.producto.bebida == "NEV" %}<span class="pill info" title="Bebida de nevera: no pasa por cocina">Nevera</span>{% endif %}
           <form method="post" action="{% url 'mesas:entregar' d.pk %}">{% csrf_token %}<button class="btn sm" type="submit">{% include "_icono.html" with nombre="check" grosor="2.6" %}Entregar</button></form>
         {% else %}<span class="pill entregado">Entregado</span>{% endif %}
         {% if not d.enviado and d.promocion_id and not facturado %}
           <form method="post" action="{% url 'mesas:quitar' d.pk %}">{% csrf_token %}<button class="ghost" type="submit" aria-label="Quitar la promoción" title="Quitar la promoción completa">✕</button></form>
         {% endif %}
-        {% if d.estado == "PEN" and d.enviado and not facturado %}
+        {% if d.enviado and d.se_puede_quitar and not facturado %}
           <form method="post" action="{% url 'mesas:quitar' d.pk %}">{% csrf_token %}<button class="ghost" type="submit" aria-label="Quitar {{ d.producto.nombre }}" title="Quitar">✕</button></form>
         {% endif %}
       </div>

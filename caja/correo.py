@@ -20,13 +20,13 @@ def enviar_factura(factura) -> tuple[bool, str]:
         return False, "La factura no tiene correo del cliente."
     factura = (Factura.objects.select_related("pedido__mesa", "pedido__mesero", "cajero")
                .prefetch_related("pagos", "pedido__detalles__producto").get(pk=factura.pk))
+    from caja.ticket import ticket_factura
+
     contexto = {
-        "factura": factura,
-        "detalles": [d for d in factura.pedido.detalles.all() if d.estado != "ANU"],
-        "local": settings.RESTAURANTE_NOMBRE,
-        "direccion": settings.RESTAURANTE_DIRECCION,
-        "telefono": settings.RESTAURANTE_TELEFONO,
-        "rif": getattr(settings, "RESTAURANTE_RIF", ""),
+        "titulo": f"Factura {factura.numero}",
+        "saludo": f"Gracias por tu visita a {settings.RESTAURANTE_NOMBRE}. Esta es tu factura:",
+        "ticket": ticket_factura(factura),
+        "pie": f"{settings.RESTAURANTE_DIRECCION} · {settings.RESTAURANTE_TELEFONO}",
     }
     mensaje = EmailMultiAlternatives(
         subject=f"Tu factura {factura.numero} · {settings.RESTAURANTE_NOMBRE}",
@@ -34,7 +34,7 @@ def enviar_factura(factura) -> tuple[bool, str]:
         from_email=settings.DEFAULT_FROM_EMAIL,
         to=[factura.cliente_correo],
     )
-    mensaje.attach_alternative(render_to_string("caja/correo/factura.html", contexto), "text/html")
+    mensaje.attach_alternative(render_to_string("caja/correo/ticket.html", contexto), "text/html")
     try:
         mensaje.send(fail_silently=False)
     except Exception as exc:  # SMTP caído, credenciales malas, sin internet…
@@ -44,6 +44,71 @@ def enviar_factura(factura) -> tuple[bool, str]:
     Factura.objects.filter(pk=factura.pk).update(correo_enviado_en=timezone.now(), correo_error="")
     registro.info("Factura %s enviada a %s", factura.numero, factura.cliente_correo)
     return True, f"Factura enviada a {factura.cliente_correo}."
+
+
+def destinos_cierre() -> list[str]:
+    """Adónde va la nota de cierre: CIERRE_CORREOS del .env o, si está vacío, los administradores con correo."""
+    if settings.CIERRE_CORREOS:
+        return list(settings.CIERRE_CORREOS)
+    from django.contrib.auth.models import User
+    from django.db.models import Q
+
+    from config.permisos import GRUPO_ADMIN
+
+    admins = User.objects.filter(Q(is_superuser=True) | Q(groups__name=GRUPO_ADMIN), is_active=True).exclude(email="")
+    return sorted(set(admins.values_list("email", flat=True)))
+
+
+def enviar_cierre(cierre, destinos: list[str]) -> tuple[bool, str]:
+    """Envía la nota de cierre de caja. Devuelve (enviado, mensaje). Nunca lanza."""
+    from caja.models import CierreCaja
+    from caja.ticket import ticket_cierre
+
+    if not destinos:
+        return False, "No hay a quién enviar la nota: escribe un correo."
+    cierre = CierreCaja.objects.select_related("cajero").get(pk=cierre.pk)
+    contexto = {
+        "titulo": f"Cierre de caja {cierre.fecha:%d/%m/%Y}",
+        "saludo": f"Nota del cierre de caja n.º {cierre.secuencia} de {cierre.cajero.username} "
+                  f"({cierre.fecha:%d/%m/%Y}).",
+        "ticket": ticket_cierre(cierre),
+        "pie": settings.RESTAURANTE_NOMBRE,
+    }
+    mensaje = EmailMultiAlternatives(
+        subject=f"Cierre de caja {cierre.fecha:%d/%m/%Y} · {cierre.cajero.username} · {settings.RESTAURANTE_NOMBRE}",
+        body=render_to_string("caja/correo/factura.txt", contexto),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=destinos,
+    )
+    mensaje.attach_alternative(render_to_string("caja/correo/ticket.html", contexto), "text/html")
+    try:
+        mensaje.send(fail_silently=False)
+    except Exception as exc:
+        registro.warning("No se pudo enviar el cierre %s: %s", cierre.pk, exc)
+        CierreCaja.objects.filter(pk=cierre.pk).update(correo_error=str(exc)[:200])
+        return False, motivo_error_correo(exc)
+    texto = ", ".join(destinos)
+    CierreCaja.objects.filter(pk=cierre.pk).update(correo_enviado_a=texto[:300], correo_enviado_en=timezone.now(),
+                                                    correo_error="")
+    registro.info("Cierre %s enviado a %s", cierre.pk, texto)
+    return True, f"Nota de cierre enviada a {texto}."
+
+
+def cierre_en_segundo_plano(cierre) -> None:
+    destinos = destinos_cierre()
+    if not destinos:
+        return
+    if settings.CORREO_SINCRONO:
+        enviar_cierre(cierre, destinos)
+        return
+
+    def tarea():
+        try:
+            enviar_cierre(cierre, destinos)
+        finally:
+            close_old_connections()
+
+    threading.Thread(target=tarea, daemon=True).start()
 
 
 def enviar_en_segundo_plano(factura) -> None:

@@ -360,6 +360,40 @@
     nuevosPrevios = n;
   }
 
+  /* Cocina y shawarmero: alarma distinta (más insistente) cuando anulan algo que ya les llegó.
+     Suena al aparecer el aviso y se repite cada 30 s mientras nadie pulse «Entendido». */
+  function alarma() {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      [0, 0.22, 0.44, 0.9, 1.12, 1.34].forEach(function (retraso, i) {
+        var osc = audio.createOscillator();
+        var vol = audio.createGain();
+        osc.type = "square";
+        osc.frequency.value = i % 3 === 0 ? 880 : (i % 3 === 1 ? 660 : 440);
+        vol.gain.setValueAtTime(0.0001, audio.currentTime + retraso);
+        vol.gain.exponentialRampToValueAtTime(0.18, audio.currentTime + retraso + 0.02);
+        vol.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + retraso + 0.18);
+        osc.connect(vol).connect(audio.destination);
+        osc.start(audio.currentTime + retraso);
+        osc.stop(audio.currentTime + retraso + 0.2);
+      });
+    } catch (e) { /* el navegador no permite audio */ }
+  }
+
+  var avisoPrevio = null;
+  var ultimaAlarma = 0;
+  function revisarAvisos() {
+    var nodo = document.querySelector("[data-aviso-ultimo]");
+    if (!nodo) return;
+    var id = parseInt(nodo.getAttribute("data-aviso-ultimo"), 10) || 0;
+    var ahora = Date.now();
+    var nuevo = avisoPrevio !== null && id > avisoPrevio;
+    var repetir = id > 0 && ahora - ultimaAlarma > 30000 && avisoPrevio !== null;
+    if ((nuevo || repetir) && sonidoActivo()) { alarma(); ultimaAlarma = ahora; }
+    if (avisoPrevio === null && id > 0) ultimaAlarma = ahora;
+    avisoPrevio = id;
+  }
+
   /* Salón: suena cuando una mesa llama al mesero desde el menú digital. */
   var enLineaPrevios = null;
   function revisarEnLinea() {
@@ -586,6 +620,57 @@
     });
   });
 
+  /* ---- caja: clientes guardados en «Datos de la factura» ----------------------
+     Al escribir la cédula, el RIF o el nombre aparecen los clientes que ya vinieron; al elegir uno
+     se llenan sus datos. */
+  var esperaCliente = null;
+  function pintarSugerencias(caja, clientes) {
+    var lista = caja.querySelector("[data-sugerencias]");
+    lista.replaceChildren();
+    clientes.forEach(function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("role", "option");
+      var nombre = document.createElement("strong");
+      nombre.textContent = c.nombre;
+      var detalle = document.createElement("small");
+      detalle.textContent = c.documento + (c.telefono ? " · " + c.telefono : "");
+      b.append(nombre, detalle);
+      b.addEventListener("click", function () {
+        var form = caja.closest("form");
+        ["documento", "nombre", "direccion", "telefono", "correo"].forEach(function (campo) {
+          var input = form.querySelector("[name=" + campo + "]");
+          if (input) input.value = c[campo] || "";
+        });
+        lista.hidden = true;
+      });
+      lista.appendChild(b);
+    });
+    lista.hidden = clientes.length === 0;
+  }
+  document.addEventListener("input", function (e) {
+    var caja = e.target.closest && e.target.closest("[data-buscar-cliente]");
+    if (!caja) return;
+    clearTimeout(esperaCliente);
+    var texto = e.target.value.trim();
+    if (texto.length < 3) { caja.querySelector("[data-sugerencias]").hidden = true; return; }
+    esperaCliente = setTimeout(function () {
+      fetch(caja.getAttribute("data-buscar-cliente") + "?q=" + encodeURIComponent(texto), { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : { clientes: [] }; })
+        .then(function (d) { pintarSugerencias(caja, d.clientes || []); })
+        .catch(function () {});
+    }, 250);
+  });
+  document.addEventListener("click", function (e) {
+    document.querySelectorAll("[data-sugerencias]").forEach(function (lista) {
+      if (!lista.parentNode.contains(e.target)) lista.hidden = true;
+    });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    document.querySelectorAll("[data-sugerencias]").forEach(function (lista) { lista.hidden = true; });
+  });
+
   /* ---- inicialización ------------------------------------------------------- */
   function inicializar(raiz) {
     leerDesfase(raiz);
@@ -594,6 +679,7 @@
     (raiz || document).querySelectorAll("[data-paginar]").forEach(function (nav) { paginar(nav.getAttribute("data-paginar")); });
     pintarBotonSonido();
     revisarNuevos(raiz);
+    revisarAvisos();
     revisarLlamados();
     revisarEnLinea();
     document.querySelectorAll("form[data-cobro]").forEach(recalcularCobro);

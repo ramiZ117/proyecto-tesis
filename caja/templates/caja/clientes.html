@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Clientes{% endblock %}
+{% block subtitle %}Clientes que pidieron factura con sus datos{% endblock %}
+{% block heading %}Clientes{% endblock %}
+{% block content %}
+<section class="card subir">
+  <form method="get" class="stack" style="margin-bottom: 14px" role="search">
+    <label class="oculto" for="buscar-clientes">Buscar cliente</label>
+    <input id="buscar-clientes" name="q" value="{{ q }}" maxlength="60" placeholder="Cédula, RIF o nombre" style="flex: 1 1 220px">
+    <button class="btn secundario" type="submit">Buscar</button>
+    {% if q %}<a class="btn ghost" href="{% url 'caja:clientes' %}">Ver todos</a>{% endif %}
+  </form>
+  <p class="obs" style="margin-top:0">Se guardan solos al hacer una factura con datos. En la próxima visita basta con escribir la cédula o el nombre en «Datos de la factura» para llenarlos.</p>
+  <div class="tabla-caja">
+    <table>
+      <thead><tr><th>Cliente</th><th>Cédula / RIF</th><th>Contacto</th><th class="der">Facturas</th><th>Última</th><th></th></tr></thead>
+      <tbody>
+        {% for c in clientes %}
+          <tr>
+            <td><strong>{{ c.nombre }}</strong><div class="obs">{{ c.direccion }}</div></td>
+            <td class="num">{{ c.documento }}</td>
+            <td class="obs">{{ c.telefono|default:"—" }}{% if c.correo %}<br>{{ c.correo }}{% endif %}</td>
+            <td class="der">{{ c.facturas }}</td>
+            <td>{% if c.ultima %}{{ c.ultima|date:"d/m/Y" }}{% else %}—{% endif %}</td>
+            <td class="der"><a href="{% url 'caja:cliente_editar' c.pk %}">Editar</a></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="6" class="obs">{% if q %}Ningún cliente coincide con «{{ q }}».{% else %}Todavía no hay clientes guardados.{% endif %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

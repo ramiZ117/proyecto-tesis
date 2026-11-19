@@ -186,6 +186,13 @@ RESTAURANTE_WHATSAPP = os.environ.get("RESTAURANTE_WHATSAPP", "584141111222")  #
 RESTAURANTE_INSTAGRAM = os.environ.get("RESTAURANTE_INSTAGRAM", "comidaarabeelamir_")
 RESTAURANTE_DIRECCION = os.environ.get("RESTAURANTE_DIRECCION", "Calle Bolívar, Puerto La Cruz, Anzoátegui")
 RESTAURANTE_RIF = os.environ.get("RESTAURANTE_RIF", "J-317688600")  # RIF del local para las facturas
+# Encabezado de la factura en ticket: razón social y dirección fiscal (líneas separadas por «|»).
+RESTAURANTE_RAZON_SOCIAL = os.environ.get("RESTAURANTE_RAZON_SOCIAL", "COMIDA ARABE EL AMIR, C.A")
+RESTAURANTE_DIRECCION_FISCAL = os.environ.get(
+    "RESTAURANTE_DIRECCION_FISCAL", "Calle Bolivar Local Nro 133|Sector Centro|Puerto La Cruz - Edo Anzoategui"
+)
+# Correos que reciben la nota de cierre de caja al generarla (separados por coma). Vacío: los administradores con correo.
+CIERRE_CORREOS = [c.strip() for c in os.environ.get("CIERRE_CORREOS", "").split(",") if c.strip()]
 
 # Asistente de IA del menú. Proveedor: gemini | groq | xai | local (sin conexión).
 # Si no se indica, usa el primero que tenga clave; sin claves responde el asistente local.

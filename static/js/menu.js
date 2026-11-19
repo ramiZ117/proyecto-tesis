@@ -630,6 +630,10 @@
         if (!document.getElementById("cuenta-paso-digital").hidden) { pintarTransferir(); return; }  // no borrar lo que escribe
         mostrarPaso("cuenta-paso-digital");
         $("#digital-titulo").textContent = "Paga por " + s.nombre + " con estos datos:";
+        var esPagoMovil = s.metodo === "PMO";
+        $("#campo-pago-telefono").hidden = !esPagoMovil;
+        $("#etiqueta-pago-origen").firstChild.textContent = esPagoMovil
+          ? "Banco desde el que pagaste " : "Correo o usuario desde el que pagaste ";
         var dl = $("#datos-pago");
         dl.replaceChildren();
         s.datos.forEach(function (fila) {
@@ -719,8 +723,14 @@
       if (!s) return;
       var ref = $("#pago-referencia").value.trim();
       if (ref.length < 4) { avisar("Escribe el número de referencia del pago."); $("#pago-referencia").focus(); return; }
+      var telefono = $("#pago-telefono").value.trim();
+      if (s.metodo === "PMO" && !/^(\+?58)?0?4\d{2}[-\s]?\d{7}$/.test(telefono)) {
+        avisar("Escribe el teléfono desde el que hiciste el pago móvil (ej.: 0414-1234567).");
+        $("#pago-telefono").focus();
+        return;
+      }
       reintentando = false;
-      enviarJson(config.reportar, { referencia: ref, origen: $("#pago-origen").value, propina: montoPropina(s).toFixed(2) }, this);
+      enviarJson(config.reportar, { referencia: ref, telefono: telefono, origen: $("#pago-origen").value, propina: montoPropina(s).toFixed(2) }, this);
     });
     $("#reintentar-pago").addEventListener("click", function () {
       var s = cuentaActual && cuentaActual.solicitud;

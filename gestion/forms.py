@@ -54,8 +54,8 @@ class ProductoForm(_Estilo, forms.ModelForm):
     class Meta:
         model = Producto
         fields = ["nombre", "categoria", "precio_usd", "descripcion", "foto", "foto_credito",
-                  "disponible", "destacado", "vegetariano", "picante", "sin_gluten", "minutos_preparacion", "opciones"]
-        labels = {"precio_usd": "Precio en USD", "foto_credito": "Crédito de la foto",
+                  "disponible", "destacado", "vegetariano", "picante", "sin_gluten", "minutos_preparacion", "opciones", "bebida"]
+        labels = {"bebida": "¿Es bebida?", "precio_usd": "Precio en USD", "foto_credito": "Crédito de la foto",
                   "destacado": "Recomendado de la casa", "disponible": "Disponible en la carta",
                   "minutos_preparacion": "Minutos de preparación", "opciones": "Personalizaciones permitidas"}
         widgets = {
@@ -161,7 +161,7 @@ class CategoriaForm(_Estilo, forms.ModelForm):
     class Meta:
         model = Categoria
         fields = ["nombre", "estacion", "orden", "activa"]
-        labels = {"estacion": "Estación de cocina", "orden": "Orden en la carta"}
+        labels = {"estacion": "Dónde se prepara", "orden": "Orden en la carta"}
         error_messages = {"nombre": {"unique": "Ya existe una categoría con ese nombre."}}
         widgets = {"orden": forms.NumberInput(attrs={"min": 0, "max": 99})}
 

@@ -20,72 +20,25 @@
     {% endfor %}
   </aside>
 
-  <section class="caja-factura card subir d1" aria-label="Detalle de la factura">
-    <div class="encabezado-fiscal solo-print">
-      <strong>{{ local_nombre }}</strong>{% if local_rif %} · RIF {{ local_rif }}{% endif %}<br>{{ local_direccion }}<br>
-      Factura {{ factura.numero }} · {{ factura.emitida_en|date:"d/m/Y H:i" }}
-    </div>
-    <div class="datos-factura-cliente">
-      {% if factura.personalizada %}
-        <strong>{{ factura.cliente_nombre }}</strong> · {{ factura.cliente_documento }}<br>
-        <span class="obs">{{ factura.cliente_direccion }}{% if factura.cliente_telefono %} · {{ factura.cliente_telefono }}{% endif %}{% if factura.cliente_correo %} · {{ factura.cliente_correo }}{% endif %}</span>
-      {% else %}
-        <strong>Consumidor final</strong>{% if factura.cliente_correo %} <span class="obs">· {{ factura.cliente_correo }}</span>{% endif %}
-      {% endif %}
-    </div>
-    <div class="stack" style="justify-content: space-between">
+  <section class="caja-factura card subir d1 hoja-ticket" aria-label="Detalle de la factura">
+    <div class="stack no-print" style="justify-content: space-between">
       <div class="obs">Atendió <strong>{{ factura.pedido.mesero.username }}</strong> · emitida por {{ factura.cajero.username }} · {{ factura.emitida_en|date:"d/m/Y H:i" }}</div>
       <span class="pill {% if factura.estado == 'PAG' %}ok{% elif factura.estado == 'ANU' %}crit{% else %}info{% endif %}">{{ factura.get_estado_display }}</span>
     </div>
     {% if factura.estado == "ANU" %}
-      <p class="pill crit" style="white-space: normal; margin-top: 12px">Anulada el {{ factura.anulada_en|date:"d/m/Y H:i" }} — {{ factura.motivo_anulacion }}</p>
+      <p class="pill crit no-print" style="white-space: normal; margin-top: 12px">Anulada el {{ factura.anulada_en|date:"d/m/Y H:i" }} — {{ factura.motivo_anulacion }}</p>
     {% endif %}
-    <div class="tabla-caja" style="margin-top: 10px">
-      <table>
-        <thead><tr><th>Plato</th><th class="der">Cant.</th><th class="der">Bs</th></tr></thead>
-        <tbody>
-          {% for d in detalles_vigentes %}
-            <tr>
-              <td><strong>{{ d.producto.nombre }}</strong>{% if d.observaciones %}<div class="obs">{{ d.observaciones }}</div>{% endif %}</td>
-              <td class="der">{{ d.cantidad }}</td>
-              <td class="der num">{{ d.subtotal|intcomma }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <div class="separador">
-      {% if factura.descuento_local %}
-        <div class="stack obs" style="justify-content: space-between"><span>Subtotal</span><span>Bs {{ factura.subtotal_local|intcomma }}</span></div>
-        <div class="linea-pago" style="color: var(--naranja-tinta)"><span>Descuento · {{ factura.descuento_motivo }}{% if factura.descuento_por %} ({{ factura.descuento_por.username }}){% endif %}</span><span class="num">− Bs {{ factura.descuento_local|intcomma }}</span></div>
-      {% endif %}
-      <div class="stack obs" style="justify-content: space-between"><span>Base imponible</span><span>Bs {{ factura.base_imponible_local|intcomma }}</span></div>
-      <div class="stack obs" style="justify-content: space-between"><span>IVA ({{ factura.iva_porcentaje|floatformat:0 }} %)</span><span>Bs {{ factura.iva_local|intcomma }}</span></div>
-      <div class="total-factura"><span>Total</span><span><strong>Bs {{ factura.total_local|intcomma }}</strong> <span class="muted">· ${{ factura.total_usd|intcomma }}</span></span></div>
-      {% if factura.pagos.all %}
-        <div class="forma-pago">
-          <div class="obs fuerte">Forma de pago</div>
-          {% for p in factura.pagos.all %}
-            <div class="linea-pago">
-              <span>{{ p.get_metodo_display }}{% if p.moneda == "USD" %} · ${{ p.monto_recibido|intcomma }}{% endif %}{% if p.referencia %} · ref. {{ p.referencia }}{% endif %}{% if p.pagador %} · {{ p.pagador }}{% endif %}{% if p.vuelto_local > 0 %} · vuelto Bs {{ p.vuelto_local|intcomma }}{% endif %}</span>
-              <span class="num">Bs {{ p.monto_local|intcomma }}</span>
-            </div>
-            {% if p.igtf_local %}<div class="linea-pago obs"><span>IGTF ({{ igtf_porcentaje|floatformat:0 }} %) por pago en divisas</span><span class="num">Bs {{ p.igtf_local|intcomma }}</span></div>{% endif %}
-          {% endfor %}
-          {% if factura.igtf_local %}<div class="stack obs" style="justify-content: space-between"><span>Total pagado con IGTF</span><span>Bs {{ factura.total_con_igtf_local|intcomma }}</span></div>{% endif %}
-        </div>
-      {% endif %}
-      {% if factura.estado == "ABI" and saldo > 0 %}
-        <div class="saldo no-print"><span class="fuerte">{% if factura.pagos.all %}Falta por cobrar{% else %}Por cobrar{% endif %}</span><span><strong>Bs {{ saldo|intcomma }}</strong> <span class="muted">· ${{ saldo_usd|intcomma }}</span></span></div>
-      {% endif %}
-    </div>
+    <pre class="ticket-papel" aria-label="Factura {{ factura.numero }}">{{ ticket }}</pre>
+    {% if factura.estado == "ABI" and saldo > 0 %}
+      <div class="saldo no-print"><span class="fuerte">{% if factura.pagos.all %}Falta por cobrar{% else %}Por cobrar{% endif %}</span><span><strong>Bs {{ saldo|intcomma }}</strong> <span class="muted">· ${{ saldo_usd|intcomma }}</span></span></div>
+    {% endif %}
     <p class="stack no-print" style="margin: 16px 0 0">
-      <button class="btn secundario sm" type="button" onclick="window.print()">{% include "_icono.html" with nombre="imprimir" %}Imprimir comprobante</button>
+      <button class="btn secundario sm" type="button" onclick="window.print()">{% include "_icono.html" with nombre="imprimir" %}Imprimir factura</button>
     </p>
 
     {% if devoluciones %}
-      <h3>Devoluciones</h3>
-      <div class="tabla-caja">
+      <h3 class="no-print">Devoluciones</h3>
+      <div class="tabla-caja no-print">
         <table>
           <thead><tr><th>Método</th><th>Devuelto</th><th>Bs</th><th>Motivo</th><th>Registró</th></tr></thead>
           <tbody>
@@ -370,10 +323,17 @@
         <form method="post" action="{% url 'caja:datos_cliente' factura.pk %}" class="pila" style="gap: 6px; margin-top: 10px" data-sin-parcial>
           {% csrf_token %}
           <p class="obs" style="margin:0">Si el cliente pide factura con sus datos, complétalos. Si no, queda como consumidor final.</p>
-          <label for="cli-nombre">Nombre o razón social</label>
-          <input id="cli-nombre" name="nombre" maxlength="120" value="{{ factura.cliente_nombre }}" required>
           <label for="cli-doc">Cédula o RIF</label>
-          <input id="cli-doc" name="documento" maxlength="20" placeholder="V-12345678 o J-123456789" value="{{ factura.cliente_documento }}" required>
+          <div class="buscar-cliente" data-buscar-cliente="{% url 'caja:cliente_buscar' %}">
+            <input id="cli-doc" name="documento" maxlength="20" placeholder="V-12345678 o J-123456789" value="{{ factura.cliente_documento }}" required autocomplete="off" aria-describedby="cli-ayuda">
+            <div class="sugerencias-cliente" data-sugerencias role="listbox" aria-label="Clientes guardados" hidden></div>
+          </div>
+          <p class="hint" id="cli-ayuda" style="margin: 2px 0 0">Si ya vino antes, escribe su cédula o nombre y elígelo: sus datos se llenan solos.</p>
+          <label for="cli-nombre">Nombre o razón social</label>
+          <div class="buscar-cliente" data-buscar-cliente="{% url 'caja:cliente_buscar' %}">
+            <input id="cli-nombre" name="nombre" maxlength="120" value="{{ factura.cliente_nombre }}" required autocomplete="off">
+            <div class="sugerencias-cliente" data-sugerencias role="listbox" aria-label="Clientes guardados" hidden></div>
+          </div>
           <label for="cli-dir">Dirección fiscal</label>
           <input id="cli-dir" name="direccion" maxlength="200" value="{{ factura.cliente_direccion }}" required>
           <div class="grid-auto" style="--min: 160px; gap: 0 12px">

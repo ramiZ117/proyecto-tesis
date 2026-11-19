@@ -1,4 +1,4 @@
-from config.permisos import GRUPO_CAJA, GRUPO_COCINA, GRUPO_MESERO, ROLES, en_grupo, es_admin, nombres_grupos
+from config.permisos import GRUPO_CAJA, GRUPO_COCINA, GRUPO_MESERO, GRUPO_SHAWARMA, ROLES, en_grupo, es_admin, nombres_grupos
 
 
 def _es_fragmento(request) -> bool:
@@ -18,7 +18,7 @@ def parcial(request):
 def roles(request):
     user = request.user
     if not user.is_authenticated:
-        return {"es_admin": False, "es_mesero": False, "es_cocinero": False, "es_cajero": False}
+        return {"es_admin": False, "es_mesero": False, "es_cocinero": False, "es_cajero": False, "es_shawarmero": False}
     admin = es_admin(user)
     if admin:
         rol_actual = "Administrador"
@@ -29,6 +29,7 @@ def roles(request):
         "es_admin": admin,
         "es_mesero": en_grupo(user, GRUPO_MESERO),
         "es_cocinero": en_grupo(user, GRUPO_COCINA),
+        "es_shawarmero": en_grupo(user, GRUPO_SHAWARMA),
         "es_cajero": en_grupo(user, GRUPO_CAJA),
         "rol_actual": rol_actual,
     }

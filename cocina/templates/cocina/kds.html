@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% load static %}
-{% block title %}Cocina{% endblock %}
+{% block title %}{{ titulo_area }}{% endblock %}
 {% block body_class %}modo-cocina{% endblock %}
 {% block encabezado %}
 <header class="kds-cab subir">
   <div class="kds-marca">
     <img src="{% static 'img/logo-el-amir-icono.jpg' %}" alt="" width="48" height="48">
     <div>
-      <h1>Cocina · El Amir</h1>
+      <h1>{{ titulo_area }} · El Amir</h1>
       <div class="obs" style="color:#9DB3AC; display:flex; align-items:center; gap:6px">
         <span class="vivo" style="width:8px;height:8px;border-radius:50%;background:#3CC59B;display:inline-block"></span>
         En vivo · {{ request.user.username }} · <span data-reloj-pared>{% now "H:i:s" %}</span>
@@ -15,11 +15,14 @@
     </div>
   </div>
   <div class="kds-controles">
+    {% if estaciones %}
     <nav class="segmentos" aria-label="Estación">
       {% for clave, nombre in estaciones %}
         <a href="?{% if clave %}estacion={{ clave }}{% endif %}" class="{% if clave == estacion %}activo{% endif %}"{% if clave == estacion %} aria-current="true"{% endif %}>{{ nombre }}</a>
       {% endfor %}
     </nav>
+    {% endif %}
+    {% if area == "COC" and es_shawarmero %}<a class="btn-kds" href="{% url 'cocina:shawarma' %}">Shawarmas</a>{% elif area == "SHA" and es_cocinero %}<a class="btn-kds" href="{% url 'cocina:kds' %}">Cocina</a>{% endif %}
     <button class="btn-kds" type="button" data-sonido aria-pressed="true">{% include "_icono.html" with nombre="sonido" %}<span data-sonido-texto>Sonido activo</span></button>
     {% if es_admin or es_mesero or es_cajero %}<a class="btn-kds" href="{% url 'inicio' %}">Volver</a>{% endif %}
     <form method="post" action="{% url 'logout' %}" data-sin-parcial>

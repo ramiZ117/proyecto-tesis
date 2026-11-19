@@ -783,3 +783,33 @@ div:has(> .selector-forma) { grid-column: 1 / -1; }
 .agregar-con-cantidad { display: grid; grid-template-columns: 96px 1fr; gap: 10px; margin-bottom: 12px; }
 .agregar-con-cantidad input { width: 100%; }
 #cantidad-plato { text-align: center; font-weight: 800; font-size: 18px; }
+
+/* Cocina y shawarmero: aviso de anulación (con alarma) */
+.kds-avisos { display: grid; gap: 10px; margin: 0 0 14px; }
+.kds-aviso { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 16px; border-radius: 16px; background: #5C1A12; border: 2px solid #F06B54; color: #FFE9E4; animation: aviso-kds 1.2s ease-in-out infinite; }
+.kds-aviso > svg { width: 28px; height: 28px; flex: none; color: #F06B54; }
+.kds-aviso > div { flex: 1 1 220px; display: grid; gap: 2px; min-width: 0; }
+.kds-aviso strong { font-size: 17px; overflow-wrap: anywhere; }
+.kds-aviso small { color: #F4BFB4; }
+.kds-aviso .accion-kds { background: #F06B54; color: #fff; border-color: #F06B54; }
+@keyframes aviso-kds { 0%, 100% { box-shadow: 0 0 0 0 rgba(240,107,84,.0); } 50% { box-shadow: 0 0 0 6px rgba(240,107,84,.35); } }
+@media (prefers-reduced-motion: reduce) { .kds-aviso { animation: none; } }
+
+/* Factura y nota de cierre en formato ticket (80 mm) */
+.ticket-papel { font-family: "Courier New", Consolas, ui-monospace, monospace; font-size: clamp(10.5px, 3vw, 13.5px); line-height: 1.4; white-space: pre; color: #111; background: #fff; border: 1px dashed #C9C2B2; border-radius: 6px; padding: 16px 14px; margin: 14px auto 0; width: fit-content; max-width: 100%; overflow-x: auto; box-shadow: 0 6px 18px rgba(0,0,0,.06); }
+.cierre-nota { display: grid; grid-template-columns: minmax(0, auto) minmax(min(280px, 100%), 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .cierre-nota { grid-template-columns: minmax(0, 1fr); } }
+.buscar-cliente { position: relative; }
+.sugerencias-cliente { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px); background: var(--superficie, #fff); border: 1px solid var(--borde-2, #ddd); border-radius: 12px; box-shadow: 0 10px 24px rgba(0,0,0,.12); padding: 4px; display: grid; gap: 2px; max-height: 260px; overflow-y: auto; }
+.sugerencias-cliente[hidden] { display: none; }
+.sugerencias-cliente button { text-align: left; background: none; border: 0; border-radius: 8px; padding: 8px 10px; font: inherit; cursor: pointer; display: grid; gap: 1px; color: inherit; }
+.sugerencias-cliente button:hover, .sugerencias-cliente button:focus-visible { background: var(--verde-100, #E6F2EA); outline: none; }
+.sugerencias-cliente small { color: var(--gris, #666); }
+@media print {
+  @page { margin: 4mm; }
+  .hoja-ticket { box-shadow: none !important; padding: 0 !important; margin: 0 !important; border: 0 !important; }
+  .hoja-ticket > :not(.ticket-papel) { display: none !important; }
+  .cierre-nota { display: block; }
+  .topbar, .no-print { display: none !important; }
+  .ticket-papel { border: 0; box-shadow: none; padding: 0; margin: 0; font-size: 11.5px; width: 72mm; overflow: visible; }
+}

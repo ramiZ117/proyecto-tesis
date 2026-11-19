@@ -23,8 +23,9 @@ class FacturaPagadaTests(DatosBase):
         f = Factura.emitir_desde_pedido(self.pedido(items=[(self.bistec, 1)]), self.cajero)
         f.cobrar(metodo=Pago.Metodo.PAGO_MOVIL, monto=Decimal("400"), referencia="1234")
         r = self.cliente(self.cajero).get(f"/caja/factura/{f.pk}/")
-        self.assertContains(r, "Forma de pago")
-        self.assertContains(r, "Pago móvil (Bs.) · ref. 1234")
+        self.assertContains(r, "PAGO MOVIL")
+        self.assertContains(r, "Ref. 1234")
+        self.assertContains(r, "TOTAL")
         self.assertNotContains(r, "− Bs 400")  # el pago no se resta del total
         self.assertNotContains(r, "Falta por cobrar")
         self.assertNotContains(r, '<span class="fuerte">Saldo</span>')

@@ -7,12 +7,14 @@ GRUPO_ADMIN = "Administradores"
 GRUPO_MESERO = "Meseros"
 GRUPO_COCINA = "Cocina"
 GRUPO_CAJA = "Caja"
+GRUPO_SHAWARMA = "Shawarmeros"
 
 ROLES = [
     (GRUPO_ADMIN, "Administrador"),
     (GRUPO_CAJA, "Cajero"),
     (GRUPO_MESERO, "Mesonero"),
     (GRUPO_COCINA, "Cocinero"),
+    (GRUPO_SHAWARMA, "Shawarmero"),
 ]
 
 

@@ -324,3 +324,5 @@ span.app-delivery { cursor: default; opacity: 1; }
 
 .botones-pregunta { display: grid; gap: 8px; }
 .casilla-pregunta[hidden] { display: none; }
+
+.ayuda-campo { font-size: 13px; margin: 4px 0 0; }

@@ -37,9 +37,16 @@ def _paralelo() -> int:
     return max(int(getattr(settings, "COCINA_PLATOS_SIMULTANEOS", 3)), 1)
 
 
-def _en_cola(antes_de=None, excluir_pedido=None):
-    platos = (DetallePedido.objects.filter(enviado=True, estado__in=PENDIENTES)
-              .select_related("producto"))
+def _area(detalle) -> str:
+    return "SHA" if detalle.producto.categoria.estacion == "SHA" else "COC"
+
+
+def _en_cola(antes_de=None, excluir_pedido=None, area: str = "COC"):
+    """Cola de un área: la cocina y el shawarmero trabajan en paralelo, cada uno con su fila."""
+    from cocina.models import filtro_area
+
+    platos = (DetallePedido.objects.filter(enviado=True, estado__in=PENDIENTES).filter(filtro_area(area))
+              .select_related("producto__categoria"))
     if antes_de is not None:
         platos = platos.filter(enviado_en__lt=antes_de)
     if excluir_pedido is not None:
@@ -47,22 +54,31 @@ def _en_cola(antes_de=None, excluir_pedido=None):
     return platos
 
 
-def carga_actual() -> int:
-    """Minutos que tardaría en arrancar un pedido que entra ahora (lo que ya está en cola)."""
+def carga_actual(area: str | None = None) -> int:
+    """Minutos que tardaría en arrancar un pedido que entra ahora (lo que ya está en cola).
+
+    Sin área: la más cargada entre la cocina y el shawarmero (estimación prudente para el cliente).
+    """
     ahora = timezone.now()
-    return math.ceil(sum(_restante(d, ahora) for d in _en_cola()) / _paralelo())
+    areas = [area] if area else ["COC", "SHA"]
+    return max(math.ceil(sum(_restante(d, ahora) for d in _en_cola(area=a)) / _paralelo()) for a in areas)
 
 
 def estimar_pedido(pedido) -> int | None:
     """Minutos que faltan para que el pedido esté listo; None si no tiene nada en cocina."""
     ahora = timezone.now()
-    propios = [d for d in pedido.detalles.filter(enviado=True, estado__in=PENDIENTES).select_related("producto")]
-    if not propios:
+    todos = [d for d in pedido.detalles.filter(enviado=True, estado__in=PENDIENTES).select_related("producto__categoria")]
+    if not todos:
         return None
-    llegada = min(d.enviado_en for d in propios if d.enviado_en) if any(d.enviado_en for d in propios) else ahora
-    delante = sum(_restante(d, ahora) for d in _en_cola(antes_de=llegada, excluir_pedido=pedido.pk))
-    mas_lento = max(_restante(d, ahora) for d in propios)
-    return max(math.ceil(delante / _paralelo() + mas_lento), 1)
+    resultado = 1
+    for area in {_area(d) for d in todos}:  # cocina y shawarmero avanzan a la vez: manda el que más tarde
+        propios = [d for d in todos if _area(d) == area]
+        fechas = [d.enviado_en for d in propios if d.enviado_en]
+        llegada = min(fechas) if fechas else ahora
+        delante = sum(_restante(d, ahora) for d in _en_cola(antes_de=llegada, excluir_pedido=pedido.pk, area=area))
+        mas_lento = max(_restante(d, ahora) for d in propios)
+        resultado = max(resultado, math.ceil(delante / _paralelo() + mas_lento))
+    return resultado
 
 
 def estimar_nuevo(minutos_platos: list[int]) -> int:

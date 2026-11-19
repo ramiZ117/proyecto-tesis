@@ -4,13 +4,30 @@
 {% block heading %}Cierre de caja {{ cierre.fecha|date:"d/m/Y" }}{% endblock %}
 {% block top_actions %}
   <div class="stack no-print">
-    <button class="btn secundario" type="button" onclick="window.print()">{% include "_icono.html" with nombre="imprimir" %}Imprimir</button>
+    <button class="btn" type="button" onclick="window.print()">{% include "_icono.html" with nombre="imprimir" %}Imprimir nota de cierre</button>
     <a class="btn secundario" href="{% url 'caja:cierre_csv' cierre.pk %}">{% include "_icono.html" with nombre="descargar" %}Exportar CSV</a>
     <a class="btn secundario" href="{% url 'caja:historial' %}">Historial</a>
   </div>
 {% endblock %}
 {% block content %}
-<section class="card subir">
+<div class="cierre-nota">
+  <section class="card subir hoja-ticket" aria-label="Nota de cierre">
+    <h2 class="no-print" style="margin-top:0">Nota de cierre</h2>
+    <pre class="ticket-papel">{{ nota }}</pre>
+  </section>
+  <form class="card pila no-print subir d1" method="post" action="{% url 'caja:cierre_correo' cierre.pk %}" style="gap: 8px; align-self: start">
+    {% csrf_token %}
+    <h2 style="margin:0">Enviar la nota por correo</h2>
+    {% if cierre.correo_enviado_en %}<p class="pill ok" style="margin:0; white-space: normal">Enviada a {{ cierre.correo_enviado_a }} el {{ cierre.correo_enviado_en|date:"d/m H:i" }}</p>
+    {% elif cierre.correo_error %}<p class="pill crit" style="margin:0; white-space: normal">No se pudo enviar: revisa el correo o la configuración.</p>{% endif %}
+    <label for="correos-cierre">Correo(s), separados por coma</label>
+    <input id="correos-cierre" name="correos" maxlength="300" placeholder="dueno@correo.com, gerente@correo.com" value="{{ cierre.correo_enviado_a|default:destinos }}" required>
+    <p class="hint" style="margin:0">Al generar un cierre la nota se envía sola a {% if destinos %}{{ destinos }}{% else %}los correos de CIERRE_CORREOS (en el .env) o de los administradores que tengan correo{% endif %}.</p>
+    <button class="btn secundario" type="submit">{% if cierre.correo_enviado_en %}Reenviar{% else %}Enviar{% endif %} nota</button>
+  </form>
+</div>
+<section class="card subir no-print" style="margin-top: 16px">
+  <h2 style="margin-top:0">Detalle</h2>
   <p class="obs" style="margin-top:0">Período: {% if cierre.desde %}{{ cierre.desde|date:"d/m/Y H:i" }}{% else %}inicio{% endif %} → {{ cierre.hasta|date:"d/m/Y H:i" }}. Los totales son los que quedaron guardados al generar el cierre.</p>
   {% include "caja/_desglose.html" %}
 </section>

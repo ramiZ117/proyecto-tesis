@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ cliente.nombre }}{% endblock %}
+{% block subtitle %}Cliente guardado{% endblock %}
+{% block heading %}{{ cliente.nombre }}{% endblock %}
+{% block top_actions %}<a class="btn secundario" href="{% url 'caja:clientes' %}">← Clientes</a>{% endblock %}
+{% block content %}
+<section class="card subir" style="max-width: 640px">
+  <form method="post" class="pila" style="gap: 6px">
+    {% csrf_token %}
+    <label for="cli-doc">Cédula o RIF</label>
+    <input id="cli-doc" name="documento" maxlength="20" value="{{ request.POST.documento|default:cliente.documento }}" required>
+    <label for="cli-nombre">Nombre o razón social</label>
+    <input id="cli-nombre" name="nombre" maxlength="120" value="{{ request.POST.nombre|default:cliente.nombre }}" required>
+    <label for="cli-dir">Dirección fiscal</label>
+    <input id="cli-dir" name="direccion" maxlength="200" value="{{ request.POST.direccion|default:cliente.direccion }}" required>
+    <div class="grid-auto" style="--min: 160px; gap: 0 12px">
+      <div><label for="cli-tel">Teléfono</label><input id="cli-tel" name="telefono" maxlength="20" inputmode="tel" value="{{ request.POST.telefono|default:cliente.telefono }}"></div>
+      <div><label for="cli-correo">Correo</label><input id="cli-correo" name="correo" type="email" maxlength="254" value="{{ request.POST.correo|default:cliente.correo }}"></div>
+    </div>
+    <p class="hint" style="margin: 4px 0 0">Los cambios sirven para las próximas facturas; las ya emitidas conservan sus datos.</p>
+    <div class="stack" style="margin-top: 8px">
+      <button class="btn" type="submit">Guardar cambios</button>
+    </div>
+  </form>
+  {% if es_admin %}
+    <form method="post" style="margin-top: 16px" data-confirmar="¿Borrar a {{ cliente.nombre }} de los clientes guardados? Sus facturas no cambian." data-confirmar-peligro>
+      {% csrf_token %}<input type="hidden" name="accion" value="borrar">
+      <button class="btn peligro sm" type="submit">Borrar cliente</button>
+    </form>
+  {% endif %}
+</section>
+{% endblock %}

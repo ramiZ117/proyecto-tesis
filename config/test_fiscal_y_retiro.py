@@ -55,8 +55,8 @@ class IvaTests(_Base):
     def test_iva_en_la_factura_el_cierre_y_el_panel(self):
         f = self.factura()
         r = self.cliente(self.cajero).get(f"/caja/factura/{f.pk}/")
-        self.assertContains(r, "IVA (16 %)")
-        self.assertContains(r, "Base imponible")
+        self.assertContains(r, "IVA G16,00%")
+        self.assertContains(r, "BI G16,00%")
         f.cobrar(metodo=Pago.Metodo.EFECTIVO, monto=Decimal("400"))
         datos = CierreCaja.calcular(cajero=self.cajero)
         self.assertEqual((datos["iva_local"], datos["base_local"]), (Decimal("55.17"), Decimal("344.83")))
@@ -108,8 +108,8 @@ class IgtfTests(_Base):
         f = self.factura()
         self.cliente(self.cajero).post(f"/caja/factura/{f.pk}/pago/", {"metodo": "DIV", "monto_recibido": "10.30"})
         r = self.cliente(self.cajero).get(f"/caja/factura/{f.pk}/")
-        self.assertContains(r, "IGTF (3 %) por pago en divisas")
-        self.assertContains(r, "Total pagado con IGTF")
+        self.assertContains(r, "IGTF 3,00%")
+        self.assertContains(r, "TOTAL PAGADO CON IGTF")
 
 
 # =============================== factura personalizada y correo ===============================
@@ -120,7 +120,7 @@ class FacturaPersonalizadaTests(_Base):
     def test_por_defecto_es_consumidor_final(self):
         f = self.factura()
         self.assertFalse(f.personalizada)
-        self.assertContains(self.cliente(self.cajero).get(f"/caja/factura/{f.pk}/"), "Consumidor final")
+        self.assertContains(self.cliente(self.cajero).get(f"/caja/factura/{f.pk}/"), "Cliente: CONSUMIDOR FINAL")
 
     def test_datos_del_cliente_validados(self):
         f = self.factura()
@@ -150,8 +150,9 @@ class FacturaPersonalizadaTests(_Base):
         self.assertEqual(correo.to, ["compras@amir.com"])
         self.assertIn(f.numero, correo.subject)
         html = correo.alternatives[0][0]
-        for texto in ("Inversiones Amir C.A.", "J-123456789", "IVA (16 %)", "Bistec"):
+        for texto in ("INVERSIONES AMIR C.A.", "J-123456789", "IVA G16,00%", "BISTEC (G)", "RIF J-317688600"):
             self.assertIn(texto, html)
+        self.assertNotIn("SENIAT", html)
         f.refresh_from_db()
         self.assertIsNotNone(f.correo_enviado_en)
 
@@ -160,7 +161,7 @@ class FacturaPersonalizadaTests(_Base):
         f.cobrar(metodo=Pago.Metodo.EFECTIVO, monto=Decimal("400"))
         self.cliente(self.cajero).post(f"/caja/factura/{f.pk}/correo/", {"correo": "cliente@correo.com"})
         self.assertEqual(mail.outbox[0].to, ["cliente@correo.com"])
-        self.assertIn("Consumidor final", mail.outbox[0].body)
+        self.assertIn("CONSUMIDOR FINAL", mail.outbox[0].body)
 
     def test_si_el_servicio_de_correo_falla_se_avisa_sin_romper(self):
         f = self.factura()
