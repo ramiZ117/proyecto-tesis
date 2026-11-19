@@ -52,7 +52,14 @@
           <h2 style="margin:0">Mesa {{ mesa_vista.numero }}</h2>
           <p style="margin:0">{{ mesa_vista.capacidad }} personas · {{ mesa_vista.get_forma_display }} · <strong>{{ mesa_vista.get_estado_display }}</strong></p>
           <p class="obs" style="margin:0">Estás revisando como administrador: la mesa no se ocupa. Queda ocupada cuando un mesonero la abre al sentar a los clientes.</p>
-          <a class="btn secundario" href="{% url 'mesas:mapa' %}">Cerrar</a>
+          <div class="stack" style="justify-content: center">
+            <form method="post" action="{% url 'mesas:abrir' mesa_vista.pk %}">
+              {% csrf_token %}<input type="hidden" name="como_admin" value="1">
+              <button class="btn" type="submit">{% include "_icono.html" with nombre="mas" grosor="2.4" %}Abrir comanda como administrador</button>
+            </form>
+            <a class="btn secundario" href="{% url 'mesas:mapa' %}">Cerrar</a>
+          </div>
+          <p class="hint" style="margin:0">Abrirla ocupa la mesa a tu nombre, para agregar platos o corregir un pedido.</p>
         </div>
       </div>
     {% else %}

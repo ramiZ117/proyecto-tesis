@@ -89,7 +89,11 @@
         {% if not d.enviado and not facturado and not d.promocion_id %}
           <div class="cantidad">
             <form method="post" action="{% url 'mesas:cantidad' d.pk %}">{% csrf_token %}<input type="hidden" name="delta" value="-1"><button class="btn-icono" type="submit" aria-label="Quitar uno de {{ d.producto.nombre }}">{% include "_icono.html" with nombre="menos" grosor="2.6" %}</button></form>
-            <span>{{ d.cantidad }}</span>
+            <form method="post" action="{% url 'mesas:cantidad' d.pk %}" class="cantidad-escrita">
+              {% csrf_token %}
+              <label class="oculto" for="cant-{{ d.pk }}">Cantidad de {{ d.producto.nombre }}</label>
+              <input id="cant-{{ d.pk }}" name="cantidad" type="number" inputmode="numeric" pattern="[0-9]*" min="1" max="99" value="{{ d.cantidad }}" data-enviar-al-cambiar>
+            </form>
             <form method="post" action="{% url 'mesas:cantidad' d.pk %}">{% csrf_token %}<input type="hidden" name="delta" value="1"><button class="btn-icono" type="submit" aria-label="Agregar uno de {{ d.producto.nombre }}">{% include "_icono.html" with nombre="mas" grosor="2.6" %}</button></form>
           </div>
         {% else %}
@@ -162,9 +166,16 @@
     {% endif %}
     <form method="post" action="{% url 'mesas:agregar' pedido.pk %}">
       {% csrf_token %}
-      <input type="hidden" name="cantidad" value="1">
-      <label for="nota-plato" style="margin-top: 0">Nota para el plato que vas a tocar <span class="obs">(opcional)</span></label>
-      <input id="nota-plato" name="observaciones" maxlength="250" placeholder="Sin ajo, término medio, salsa aparte…" style="margin-bottom: 12px">
+      <div class="agregar-con-cantidad">
+        <div>
+          <label for="cantidad-plato" style="margin-top: 0">Cantidad</label>
+          <input id="cantidad-plato" name="cantidad" type="number" inputmode="numeric" pattern="[0-9]*" min="1" max="99" value="1" required data-volver-a-uno>
+        </div>
+        <div>
+          <label for="nota-plato" style="margin-top: 0">Nota para el plato que vas a tocar <span class="obs">(opcional)</span></label>
+          <input id="nota-plato" name="observaciones" maxlength="250" placeholder="Sin ajo, término medio, salsa aparte…">
+        </div>
+      </div>
       <div class="carta-grid">
         {% for categoria in categorias %}
           {% for producto in categoria.productos.all %}
@@ -204,9 +215,20 @@
         </form>
       {% endif %}
     </div>
-    {% if pedido.es_para_llevar %}<p class="obs" style="margin:0">Caja cobra el pedido para llevar cuando el cliente lo retira.</p>{% endif %}
+    {% if pedido.es_para_llevar %}
+      {% if es_cajero and detalles and not hay_sin_enviar %}
+        {% if facturado %}
+          <a class="btn grande azul bloque" href="{% url 'caja:factura' facturado.pk %}">{% if facturado.estado == "PAG" %}Ver factura (pagada){% else %}Ir a cobrar{% endif %}</a>
+        {% else %}
+          <form method="post" action="{% url 'caja:emitir' pedido.pk %}" style="display: flex">
+            {% csrf_token %}<button class="btn grande azul bloque" type="submit">{% include "_icono.html" with nombre="caja" %}Cobrar ahora</button>
+          </form>
+        {% endif %}
+      {% endif %}
+      <p class="obs" style="margin:0">Se puede cobrar antes o después de que cocina lo prepare: el pedido sigue en cocina hasta que se entrega.</p>
+    {% endif %}
     <div class="stack" style="justify-content: space-between">
-      <a class="ghost" href="{% url 'mesas:mapa' %}">← Volver al mapa</a>
+      <a class="ghost" href="{{ volver_url|default:'/mesas/' }}">← {{ volver_texto|default:"Volver al mapa" }}</a>
       {% if not facturado %}
         <form method="post" action="{% url 'mesas:anular' pedido.pk %}" data-confirmar="¿Anular este pedido{% if pedido.mesa %} y liberar la mesa{% endif %}?" data-confirmar-peligro>
           {% csrf_token %}

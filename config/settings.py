@@ -86,7 +86,9 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'config.middleware.ErroresJsonMiddleware',
 ]
+CSRF_FAILURE_VIEW = 'config.middleware.csrf_fallido'
 
 ROOT_URLCONF = 'config.urls'
 

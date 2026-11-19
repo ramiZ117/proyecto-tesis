@@ -32,7 +32,8 @@
           <a href="{% url 'cocina:kds' %}" class="{% if seccion == 'cocina' %}activo{% endif %}">{% include "_icono.html" with nombre="cocina" %}Cocina</a>
         {% endif %}
         {% if es_cajero %}
-          <a href="{% url 'caja:cuentas' %}" class="{% if seccion == 'caja' and vista != 'tasa' and vista != 'cierre' and vista != 'reporte' and vista != 'historial' and vista != 'cierre_detalle' and vista != 'propinas' and vista != 'en_linea' %}activo{% endif %}">{% include "_icono.html" with nombre="caja" %}Caja</a>
+          <a href="{% url 'caja:cuentas' %}" class="{% if seccion == 'caja' and vista != 'tasa' and vista != 'cierre' and vista != 'reporte' and vista != 'historial' and vista != 'cierre_detalle' and vista != 'propinas' and vista != 'en_linea' and vista != 'llevar' %}activo{% endif %}">{% include "_icono.html" with nombre="caja" %}Caja</a>
+          <a href="{% url 'caja:llevar' %}" class="{% if vista == 'llevar' or vista == 'comanda' and not es_mesero %}activo{% endif %}">{% include "_icono.html" with nombre="llevar" %}Para llevar</a>
           <a href="{% url 'caja:en_linea' %}" class="{% if vista == 'en_linea' %}activo{% endif %}">{% include "_icono.html" with nombre="llevar" %}Pedidos en línea{% if en_linea_pendientes %}<span class="contador">{{ en_linea_pendientes }}</span>{% endif %}</a>
           <a href="{% url 'caja:tasa' %}" class="{% if vista == 'tasa' %}activo{% endif %}">{% include "_icono.html" with nombre="tasa" %}Tasa de cambio</a>
           <a href="{% url 'caja:propinas' %}" class="{% if vista == 'propinas' %}activo{% endif %}">{% include "_icono.html" with nombre="persona" %}Propinas</a>

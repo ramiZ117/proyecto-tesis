@@ -7,15 +7,27 @@ from django.views.decorators.http import require_POST
 
 from caja.models import TasaCambio
 from config.dinero import precio_local_vigente
-from config.permisos import GRUPO_MESERO, es_admin, nombres_grupos, requiere_grupo, texto_validacion
+from config.permisos import GRUPO_CAJA, GRUPO_MESERO, en_grupo, es_admin, nombres_grupos, requiere_grupo, texto_validacion
 from inventario.models import Categoria, Producto, Promocion
 from inventario.servicios import disponibilidad_menu
 from mesas.models import DetallePedido, Mesa, Pedido, SolicitudCliente
 
 
 def _atiende(request, pedido: Pedido) -> bool:
-    """Un mesero solo gestiona sus pedidos; el administrador gestiona todos."""
-    return es_admin(request.user) or pedido.mesero_id == request.user.id
+    """Un mesero gestiona sus pedidos; la caja, los pedidos para llevar; el administrador, todos."""
+    if es_admin(request.user) or pedido.mesero_id == request.user.id:
+        return True
+    return pedido.es_para_llevar and not pedido.en_linea and en_grupo(request.user, GRUPO_CAJA)
+
+
+def _es_caja_solo(user) -> bool:
+    """Cajero que no es mesero: trabaja desde la pantalla «Para llevar» de la caja, no desde el salón."""
+    grupos = nombres_grupos(user)
+    return not es_admin(user) and GRUPO_MESERO not in grupos and GRUPO_CAJA in grupos
+
+
+def _inicio(request):
+    return redirect("caja:llevar") if _es_caja_solo(request.user) else redirect("mesas:mapa")
 
 
 def _pedido_propio(request, pedido_id: int):
@@ -24,7 +36,7 @@ def _pedido_propio(request, pedido_id: int):
     if not _atiende(request, pedido):
         quien = f"La {pedido.mesa}" if pedido.mesa_id else f"El pedido {pedido.etiqueta}"
         messages.error(request, f"{quien} la atiende {pedido.mesero.username}.")
-        return pedido, redirect("mesas:mapa")
+        return pedido, _inicio(request)
     return pedido, None
 
 
@@ -111,7 +123,7 @@ def mapa_parcial(request):
 @require_POST
 def abrir_pedido(request, mesa_id):
     mesa = get_object_or_404(Mesa, pk=mesa_id, activa=True)
-    if _solo_supervisa(request.user):
+    if _solo_supervisa(request.user) and not request.POST.get("como_admin"):
         # Revisar no ocupa: si la mesa tiene comanda se muestra; si está libre, sigue libre.
         pedido = mesa.pedido_activo()
         if pedido is not None:
@@ -128,19 +140,19 @@ def abrir_pedido(request, mesa_id):
     return _volver(pedido)
 
 
-@requiere_grupo(GRUPO_MESERO)
+@requiere_grupo(GRUPO_MESERO, GRUPO_CAJA)
 @require_POST
 def nuevo_para_llevar(request):
     try:
         pedido = Pedido.crear_para_llevar(request.POST.get("cliente", ""), request.user)
     except ValidationError as exc:
         messages.error(request, texto_validacion(exc))
-        return redirect("mesas:mapa")
+        return _inicio(request)
     messages.success(request, f"Pedido para llevar {pedido.codigo} abierto para {pedido.cliente}.")
     return _volver(pedido)
 
 
-@requiere_grupo(GRUPO_MESERO)
+@requiere_grupo(GRUPO_MESERO, GRUPO_CAJA)
 def comanda(request, pedido_id):
     pedido, respuesta = _pedido_propio(request, pedido_id)
     if respuesta:
@@ -186,8 +198,12 @@ def comanda(request, pedido_id):
             "detalles": detalles,
             "subtotal_usd": _a_usd(pedido.subtotal),
             "mesas_libres": [m for m in contexto["mesas"] if m.estado == Mesa.Estado.DISPONIBLE and not m.pedido_info],
+            "volver_url": reverse("caja:llevar") if _es_caja_solo(request.user) else reverse("mesas:mapa"),
+            "volver_texto": "Pedidos para llevar" if _es_caja_solo(request.user) else "Volver al mapa",
         }
     )
+    if _es_caja_solo(request.user):
+        return render(request, "caja/llevar.html", contexto)
     return render(request, "mesas/salon.html", contexto)
 
 
@@ -196,7 +212,7 @@ def _a_usd(monto_local):
     return tasa.a_usd(monto_local) if tasa else None
 
 
-@requiere_grupo(GRUPO_MESERO)
+@requiere_grupo(GRUPO_MESERO, GRUPO_CAJA)
 @require_POST
 def agregar_item(request, pedido_id):
     pedido, respuesta = _pedido_propio(request, pedido_id)
@@ -249,18 +265,31 @@ def agregar_item(request, pedido_id):
     return _volver(pedido)
 
 
-@requiere_grupo(GRUPO_MESERO)
+@requiere_grupo(GRUPO_MESERO, GRUPO_CAJA)
 @require_POST
 def cambiar_cantidad(request, detalle_id):
     detalle = get_object_or_404(DetallePedido.objects.select_related("pedido"), pk=detalle_id)
     pedido, respuesta = _pedido_propio(request, detalle.pedido_id)
     if respuesta:
         return respuesta
-    delta = 1 if request.POST.get("delta") == "1" else -1
+    escrita = (request.POST.get("cantidad") or "").strip()
+    if escrita:
+        # Cantidad escrita con el teclado numérico (para pedidos grandes).
+        if not escrita.isdigit() or not 1 <= int(escrita) <= 99:
+            messages.error(request, "Escribe una cantidad entre 1 y 99.")
+            return _volver(pedido)
+        delta = int(escrita) - detalle.cantidad
+        if delta == 0:
+            return _volver(pedido)
+    else:
+        delta = 1 if request.POST.get("delta") == "1" else -1
     if delta > 0:
         porciones = disponibilidad_menu().get(detalle.producto_id)
-        if porciones is not None and porciones < 1:
-            messages.error(request, f"No quedan porciones de {detalle.producto.nombre}.")
+        if porciones is not None and porciones < delta:
+            if porciones < 1:
+                messages.error(request, f"No quedan porciones de {detalle.producto.nombre}.")
+            else:
+                messages.error(request, f"Solo quedan {porciones} porciones más de {detalle.producto.nombre}.")
             return _volver(pedido)
     try:
         detalle.cambiar_cantidad(delta)
@@ -269,7 +298,7 @@ def cambiar_cantidad(request, detalle_id):
     return _volver(pedido)
 
 
-@requiere_grupo(GRUPO_MESERO)
+@requiere_grupo(GRUPO_MESERO, GRUPO_CAJA)
 @require_POST
 def nota_pedido(request, pedido_id):
     pedido, respuesta = _pedido_propio(request, pedido_id)
@@ -303,7 +332,7 @@ def mover_pedido(request, pedido_id):
     return _volver(pedido)
 
 
-@requiere_grupo(GRUPO_MESERO)
+@requiere_grupo(GRUPO_MESERO, GRUPO_CAJA)
 @require_POST
 def quitar_item(request, detalle_id):
     detalle = get_object_or_404(DetallePedido.objects.select_related("pedido__mesa", "pedido__mesero"), pk=detalle_id)
@@ -318,7 +347,7 @@ def quitar_item(request, detalle_id):
     return _volver(pedido)
 
 
-@requiere_grupo(GRUPO_MESERO)
+@requiere_grupo(GRUPO_MESERO, GRUPO_CAJA)
 @require_POST
 def enviar_cocina(request, pedido_id):
     pedido, respuesta = _pedido_propio(request, pedido_id)
@@ -347,7 +376,7 @@ def solicitar_cuenta(request, pedido_id):
     return redirect("mesas:mapa")
 
 
-@requiere_grupo(GRUPO_MESERO)
+@requiere_grupo(GRUPO_MESERO, GRUPO_CAJA)
 @require_POST
 def anular_pedido(request, pedido_id):
     pedido, respuesta = _pedido_propio(request, pedido_id)
@@ -362,10 +391,10 @@ def anular_pedido(request, pedido_id):
     except ValidationError as exc:
         messages.error(request, texto_validacion(exc))
         return _volver(pedido)
-    return redirect("mesas:mapa")
+    return _inicio(request)
 
 
-@requiere_grupo(GRUPO_MESERO)
+@requiere_grupo(GRUPO_MESERO, GRUPO_CAJA)
 @require_POST
 def entregar_item(request, detalle_id):
     detalle = get_object_or_404(DetallePedido.objects.select_related("pedido__mesa", "pedido__mesero"), pk=detalle_id)
@@ -398,7 +427,7 @@ def _promo_vigente(promocion_id):
     return Promocion.vigentes().filter(pk=promocion_id).first()
 
 
-@requiere_grupo(GRUPO_MESERO)
+@requiere_grupo(GRUPO_MESERO, GRUPO_CAJA)
 @require_POST
 def agregar_promocion(request, pedido_id):
     pedido, respuesta = _pedido_propio(request, pedido_id)
@@ -486,7 +515,7 @@ def _cuenta_cliente(pedido):
 
 
 
-@requiere_grupo(GRUPO_MESERO)
+@requiere_grupo(GRUPO_MESERO, GRUPO_CAJA)
 @require_POST
 def personalizar_item(request, detalle_id):
     """Opciones permitidas del plato (sin vegetales, salsa aparte…) y nota libre, antes de enviarlo a cocina."""
@@ -522,7 +551,7 @@ def _minutos_pedido(pedido):
 
 
 
-@requiere_grupo(GRUPO_MESERO)
+@requiere_grupo(GRUPO_MESERO, GRUPO_CAJA)
 @require_POST
 def entregar_todo(request, pedido_id):
     """Marca como entregados, de una vez, todos los platos que cocina dejó listos."""

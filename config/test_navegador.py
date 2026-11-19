@@ -103,7 +103,7 @@ class NavegadorTests(StaticLiveServerTestCase):
         sala.click("button.plato:has-text('Té árabe')")
         self.esperar_mensaje(sala, "Se agregó 1 × Té árabe")
         sala.click("button[aria-label='Agregar uno de Shawarma de pollo']")
-        sala.wait_for_selector(".item-comanda:has-text('Shawarma de pollo') .cantidad span:text-is('2')")
+        sala.wait_for_selector(".item-comanda:has-text('Shawarma de pollo') .cantidad input[value='2']")
         pedido = Pedido.objects.get(mesa=self.mesa)
         self.assertEqual(
             sorted(pedido.detalles.values_list("producto__nombre", "cantidad", "observaciones")),

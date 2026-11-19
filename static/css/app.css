@@ -772,3 +772,14 @@ div:has(> .selector-forma) { grid-column: 1 / -1; }
 .gasto-fila:last-of-type { border-bottom: 0; }
 .gasto-fila.apagado { opacity: .55; }
 .gasto-acciones { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+.total-factura { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 10px 0 4px; font-size: 18px; font-weight: 800; border-top: 2px solid var(--borde); margin-top: 6px; }
+.total-factura strong { font-size: 22px; }
+.forma-pago { display: grid; gap: 4px; margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--superficie-2); }
+
+/* Cantidad escrita (teclado numérico) */
+.cantidad-escrita input { width: 54px; min-height: 36px; padding: 4px; text-align: center; font-weight: 800; font-size: 16px; }
+.cantidad-escrita input::-webkit-outer-spin-button, .cantidad-escrita input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.agregar-con-cantidad { display: grid; grid-template-columns: 96px 1fr; gap: 10px; margin-bottom: 12px; }
+.agregar-con-cantidad input { width: 100%; }
+#cantidad-plato { text-align: center; font-weight: 800; font-size: 18px; }

@@ -279,7 +279,7 @@ class AsistenteRobustoTests(DatosBase):
             self.assertEqual(self.preguntar("hola")["origen"], "local")
             self.assertEqual(self.preguntar("hola")["origen"], "local")
         self.assertEqual(llamada.call_count, 1)  # la segunda pregunta ni siquiera intentó la IA
-        cache.delete(asistente.CLAVE_PAUSA)
+        cache.delete(f"{asistente.CLAVE_PAUSA}:gemini")
         ok = {"candidates": [{"content": {"parts": [{"text": "Hola"}]}}]}
         with mock.patch.object(asistente, "_post_json", return_value=ok):
             self.assertEqual(self.preguntar("hola")["origen"], "gemini")

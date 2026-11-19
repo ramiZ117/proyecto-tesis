@@ -135,6 +135,17 @@ def proveedor_activo() -> dict:
     return {"clave": elegido, "nombre": nombre, "modelo": getattr(settings, modelo)}
 
 
+def proveedores_disponibles() -> list[dict]:
+    """Proveedores con clave, empezando por el elegido en IA_PROVEEDOR (para cambiar solo si uno falla)."""
+    orden = [settings.IA_PROVEEDOR] + [c for c in PROVEEDORES if c != settings.IA_PROVEEDOR]
+    lista = []
+    for clave in orden:
+        if clave in PROVEEDORES and getattr(settings, PROVEEDORES[clave][1]):
+            nombre, _clave, modelo = PROVEEDORES[clave]
+            lista.append({"clave": clave, "nombre": nombre, "modelo": getattr(settings, modelo)})
+    return lista
+
+
 def _post_json(url: str, cuerpo: dict, cabeceras: dict) -> dict:
     peticion = urllib.request.Request(
         url, data=json.dumps(cuerpo).encode(), headers={"Content-Type": "application/json", **cabeceras}, method="POST"
@@ -249,16 +260,21 @@ def responder(mensaje: str, historial: list[dict] | None = None, plato_id: int |
             conversacion.append({"rol": turno["rol"], "texto": turno["texto"][:600]})
     conversacion.append({"rol": "cliente", "texto": mensaje})
 
-    proveedor = proveedor_activo()
     texto, origen = "", "local"
-    if proveedor["clave"] != "local" and not cache.get(CLAVE_PAUSA):
+    sistema = instrucciones(carta, plato)
+    # Cadena de respaldo: el proveedor elegido y luego los demás que tengan clave (Gemini → Groq → Grok);
+    # si ninguno responde, contesta el asistente local. Cada proveedor que falla descansa un rato.
+    for proveedor in proveedores_disponibles():
+        pausa = f"{CLAVE_PAUSA}:{proveedor['clave']}"
+        if cache.get(pausa):
+            continue
         try:
-            texto = texto_plano(_llamar_modelo(proveedor, instrucciones(carta, plato), conversacion))
+            texto = texto_plano(_llamar_modelo(proveedor, sistema, conversacion))
             origen = proveedor["clave"]
-        except (urllib.error.URLError, TimeoutError, KeyError, IndexError, ValueError, OSError) as exc:
-            cache.set(CLAVE_PAUSA, True, PAUSA_TRAS_FALLA)
-            registro.warning("Asistente %s no respondió (%s); responde el asistente local por %s s.",
-                             proveedor["clave"], exc, PAUSA_TRAS_FALLA)
+            break
+        except Exception as exc:  # red, cuota, clave inválida, respuesta rara: nunca debe tumbar el chat
+            cache.set(pausa, True, PAUSA_TRAS_FALLA)
+            registro.warning("Asistente %s no respondió (%s); se prueba el siguiente proveedor.", proveedor["clave"], exc)
     if not texto:
         texto, origen = respuesta_local(mensaje, carta, plato), "local"
     return {"respuesta": texto, "origen": origen, "platos": platos_mencionados(texto, carta)}

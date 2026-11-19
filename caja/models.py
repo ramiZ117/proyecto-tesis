@@ -176,6 +176,8 @@ class Factura(models.Model):
             raise ValidationError("El total del pedido es cero; no se puede facturar.")
         tasa = TasaCambio(valor=Decimal(tasa)) if tasa is not None else TasaCambio.vigente()
         factura = None
+        ultimo_error = None
+        numero = cls._siguiente_numero()
         for _ in range(cls.INTENTOS_NUMERO):
             try:
                 # Punto de guardado: si el número choca, solo se deshace este intento.
@@ -183,19 +185,27 @@ class Factura(models.Model):
                     factura = cls.objects.create(
                         pedido=pedido,
                         cajero=cajero,
-                        numero=cls._siguiente_numero(),
+                        numero=numero,
                         tasa_cambio=tasa.valor,
                         subtotal_local=total_local,
                         total_local=total_local,
                         total_usd=tasa.a_usd(total_local),
                     )
                 break
-            except IntegrityError:
+            except IntegrityError as exc:
                 if pedido.factura_activa:
                     raise ValidationError("Este pedido ya tiene una factura vigente.")
-                # Otro cajero tomó el mismo correlativo: se recalcula y se reintenta.
+                ultimo_error = exc
+                # Otro cajero tomó ese correlativo (o ya existía): se avanza al siguiente libre.
+                numero = cls._siguiente_numero(despues_de=numero)
         if factura is None:
-            raise ValidationError("No se pudo asignar el número de factura. Intenta de nuevo.")
+            import logging
+
+            logging.getLogger("el_amir").error("No se pudo emitir la factura del pedido %s: %s", pedido.pk, ultimo_error)
+            raise ValidationError(
+                f"No se pudo asignar el número de factura. Intenta de nuevo; si sigue, actualiza el sistema "
+                f"(git pull y python manage.py migrate). Detalle: {ultimo_error}"
+            )
         factura.calcular_impuestos()
         factura.save(update_fields=["iva_porcentaje", "base_imponible_local", "iva_local"])
         cuenta = SolicitudCuenta.activa_de(pedido)
@@ -208,12 +218,24 @@ class Factura(models.Model):
     INTENTOS_NUMERO = 5
 
     @classmethod
-    def _siguiente_numero(cls) -> str:
-        """Correlativo F-000001, F-000002… siguiente al último emitido (las anuladas también consumen número)."""
-        ultimo = cls.objects.order_by("-id").values_list("numero", flat=True).first()
-        if not ultimo:
-            return "F-000001"
-        return f"F-{int(ultimo.rsplit('-', 1)[-1]) + 1:06d}"
+    def _siguiente_numero(cls, despues_de: str | None = None) -> str:
+        """Correlativo F-000001, F-000002…: uno más que el MAYOR número emitido (las anuladas también cuentan).
+
+        Se toma el mayor y no el de la última fila, para que datos importados o corregidos a mano no
+        traben la numeración. Números con otro formato se ignoran.
+        """
+        import re
+
+        mayor = 0
+        for numero in cls.objects.filter(numero__startswith="F-").values_list("numero", flat=True):
+            hallado = re.fullmatch(r"F-(\d+)", numero)
+            if hallado:
+                mayor = max(mayor, int(hallado.group(1)))
+        if despues_de:
+            hallado = re.fullmatch(r"F-(\d+)", despues_de)
+            if hallado:
+                mayor = max(mayor, int(hallado.group(1)))
+        return f"F-{mayor + 1:06d}"
 
     @transaction.atomic
     def cobrar(self, *, metodo: str, monto: Decimal, referencia: str = "", pagador: str = ""):
@@ -327,6 +349,8 @@ class Factura(models.Model):
         self.save(update_fields=["estado", "pagada_en"])
         if self.pedido.en_linea:
             return  # se pagó por adelantado: la comanda se cierra cuando el cliente la retira
+        if self.pedido.es_para_llevar and self.pedido.detalles_vigentes.exclude(estado="ENT").exists():
+            return  # cobrado en el mostrador: sigue en cocina y se cierra al entregarlo
         self.pedido.estado = Pedido.Estado.CERRADO
         self.pedido.cerrado_en = ahora
         self.pedido.save(update_fields=["estado", "cerrado_en", "actualizado_en"])

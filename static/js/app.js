@@ -82,6 +82,13 @@
     });
   }, true);
 
+  document.addEventListener("change", function (e) {
+    var campo = e.target;
+    if (campo.matches && campo.matches("[data-enviar-al-cambiar]") && campo.form && campo.checkValidity()) {
+      if (campo.form.requestSubmit) campo.form.requestSubmit(); else campo.form.submit();
+    }
+  });
+
   /* ---- refresco de pantallas vivas (mapa, cocina) ------------------------------ */
   var vigias = {};
 

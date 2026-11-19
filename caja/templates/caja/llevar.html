@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}{% if pedido %}{{ pedido.etiqueta }}{% else %}Para llevar{% endif %}{% endblock %}
+{% block subtitle %}Pedidos de quien llega al mostrador: se cargan, se envían a cocina y se cobran desde la caja{% endblock %}
+{% block heading %}Para llevar{% endblock %}
+{% block content %}
+<div class="salon{% if pedido %} con-comanda{% endif %}">
+  <section class="salon-mapa">
+    <section class="card subir" aria-label="Pedidos para llevar">
+      <div class="card-cabecera">
+        <h2 class="stack">{% include "_icono.html" with nombre="llevar" %} Pedidos en curso</h2>
+        <form class="llevar-nuevo" method="post" action="{% url 'mesas:llevar_nuevo' %}">
+          {% csrf_token %}
+          <label class="oculto" for="cliente-llevar">Nombre del cliente</label>
+          <input id="cliente-llevar" name="cliente" maxlength="80" placeholder="Nombre del cliente" required>
+          <button class="btn" type="submit">{% include "_icono.html" with nombre="mas" grosor="2.4" %}Nuevo pedido</button>
+        </form>
+      </div>
+      {% if llevar %}
+        <div class="llevar-grid">
+          {% for p in llevar %}
+            <a class="llevar-item{% if p.estado == 'LIS' or p.estado == 'ENT' %} listo{% endif %}{% if pedido and pedido.pk == p.pk %} sel{% endif %}" href="{% url 'mesas:comanda' p.pk %}">
+              <span class="stack" style="justify-content: space-between"><strong>{{ p.codigo }} · {{ p.cliente }}</strong>
+                <span class="pill {% if p.estado == 'LIS' or p.estado == 'ENT' %}ok{% elif p.estado == 'ABI' %}warn{% else %}ocu{% endif %}">{% if p.estado == 'LIS' %}Listo para entregar{% else %}{{ p.get_estado_display }}{% endif %}</span></span>
+              <span class="obs">{% for d in p.detalles.all %}{{ d.cantidad }} × {{ d.producto.nombre }}{% if not forloop.last %} · {% endif %}{% empty %}Sin platos todavía{% endfor %}</span>
+              {% if p.factura_vigente.estado == "PAG" %}<span class="pill info">Pagado</span>{% endif %}
+            </a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="vacio">No hay pedidos para llevar en curso. Escribe el nombre del cliente y toca «Nuevo pedido».</p>
+      {% endif %}
+    </section>
+  </section>
+  <aside class="salon-panel subir d2" aria-label="Comanda">
+    {% if pedido %}
+      {% include "mesas/_comanda.html" %}
+    {% else %}
+      <div class="comanda"><div class="panel-vacio">
+        {% include "_icono.html" with nombre="llevar" grosor="1.5" %}
+        <h2 style="margin:0">Elige o crea un pedido</h2>
+        <p style="margin:0">Carga los platos, envíalos a cocina y cobra cuando quieras: antes o al entregarlo.</p>
+      </div></div>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

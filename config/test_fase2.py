@@ -65,7 +65,16 @@ class ParaLlevarTests(DatosBase):
         self.assertContains(caja, f"Llevar {pedido.codigo}")
         factura = _cobrar(pedido, self.cajero)
         pedido.refresh_from_db()
-        self.assertEqual((factura.estado, pedido.estado), (Factura.Estado.PAGADA, Pedido.Estado.CERRADO))
+        # Cobrado en el mostrador antes de estar listo: sigue en cocina hasta que se entrega.
+        self.assertEqual(factura.estado, Factura.Estado.PAGADA)
+        self.assertNotEqual(pedido.estado, Pedido.Estado.CERRADO)
+        self.assertContains(self.cliente(self.chef).get("/cocina/"), f"Llevar {pedido.codigo}")
+        for d in pedido.detalles.all():
+            d.marcar_en_preparacion()
+            d.marcar_listo()
+            d.marcar_entregado()
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.estado, Pedido.Estado.CERRADO)
         self.res.refresh_from_db()
         self.assertEqual(self.res.stock_actual, Decimal("9.600"))  # receta descontada
         self.assertContains(self.cliente(self.cajero).get(f"/caja/factura/{factura.pk}/"), "Pedido para llevar entregado")

@@ -108,7 +108,7 @@ class IgtfTests(_Base):
         f = self.factura()
         self.cliente(self.cajero).post(f"/caja/factura/{f.pk}/pago/", {"metodo": "DIV", "monto_recibido": "10.30"})
         r = self.cliente(self.cajero).get(f"/caja/factura/{f.pk}/")
-        self.assertContains(r, "IGTF (3 %) sobre el pago en divisas")
+        self.assertContains(r, "IGTF (3 %) por pago en divisas")
         self.assertContains(r, "Total pagado con IGTF")
 
 

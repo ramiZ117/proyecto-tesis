@@ -6,6 +6,7 @@ app_name = "caja"
 
 urlpatterns = [
     path("", views.cuentas, name="cuentas"),
+    path("para-llevar/", views.llevar, name="llevar"),
     path("pedido/<int:pedido_id>/facturar/", views.emitir_factura, name="emitir"),
     path("factura/<int:factura_id>/", views.factura_detalle, name="factura"),
     path("factura/<int:factura_id>/pago/", views.registrar_pago, name="pago"),

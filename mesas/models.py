@@ -346,6 +346,14 @@ class Pedido(models.Model):
         else:
             nuevo = self.Estado.ABIERTO
         self.estado = nuevo
+        cerrar = False
+        if nuevo == self.Estado.ENTREGADO and self.es_para_llevar:
+            factura = self.factura_activa
+            cerrar = factura is not None and factura.estado == "PAG"  # pagado y entregado: listo
+        if cerrar:
+            self.estado, self.cerrado_en = self.Estado.CERRADO, timezone.now()
+            self.save(update_fields=["estado", "cerrado_en", "actualizado_en"])
+            return
         self.save(update_fields=["estado", "actualizado_en"])
 
 

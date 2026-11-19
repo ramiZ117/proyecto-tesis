@@ -23,3 +23,41 @@ class RespuestaParcialMiddleware:
             del response["Location"]
             response["X-Next"] = destino
         return response
+
+
+
+class ErroresJsonMiddleware:
+    """En las llamadas del menú digital (que esperan JSON), un error del servidor responde JSON con el
+    motivo, para que el teléfono no lo confunda con «sin conexión». El detalle queda en el registro."""
+
+    RUTAS = ("/menu/",)
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        return self.get_response(request)
+
+    def process_exception(self, request, exception):
+        if request.method != "POST" or not request.path.startswith(self.RUTAS):
+            return None
+        import logging
+
+        from django.conf import settings
+        from django.http import JsonResponse
+
+        logging.getLogger("el_amir").exception("Error en %s", request.path)
+        detalle = f" ({type(exception).__name__}: {exception})" if settings.DEBUG else ""
+        return JsonResponse({"error": "El sistema tuvo un problema al procesar tu solicitud. "
+                                      "Avisa al personal." + detalle}, status=500)
+
+
+def csrf_fallido(request, reason=""):
+    """Si el navegador no envió la cookie de seguridad (CSRF), se explica en vez de mostrar «sin conexión»."""
+    from django.http import JsonResponse
+    from django.views.csrf import csrf_failure
+
+    if request.path.startswith("/menu/") or "application/json" in request.headers.get("Content-Type", ""):
+        return JsonResponse({"error": "La página quedó desactualizada o el navegador bloqueó la cookie de seguridad "
+                                      "del sitio. Recarga la página e intenta de nuevo.", "motivo": reason}, status=403)
+    return csrf_failure(request, reason=reason)

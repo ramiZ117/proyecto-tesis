@@ -31,6 +31,18 @@
     return vacia;
   }
 
+  /* Lee la respuesta del servidor. Si no es JSON (error interno, página de seguridad…), arma un
+     mensaje con el código en vez de decir «sin conexión», que confunde. */
+  function leerRespuesta(r) {
+    return r.text().then(function (texto) {
+      try { return { ok: r.ok, datos: JSON.parse(texto) }; } catch (e) {
+        var motivo = r.status === 403 ? "La página quedó desactualizada. Recárgala e intenta de nuevo."
+          : "El servidor tuvo un problema (código " + r.status + "). Avisa al personal.";
+        return { ok: false, datos: { error: motivo } };
+      }
+    });
+  }
+
   /* Aviso con el diseño del menú (en vez del avisar() del navegador). */
   var dlgAviso = null;
   function avisar(texto) {
@@ -287,7 +299,7 @@
       headers: { "Content-Type": "application/json", "X-CSRFToken": csrf() },
       body: JSON.stringify({ mensaje: pregunta, historial: historial.slice(-8), plato: platoId || null })
     })
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, datos: d }; }); })
+      .then(leerRespuesta)
       .then(function (res) {
         escribiendo.remove();
         if (!res.ok) { burbuja("asistente error", res.datos.error || "No pude responder ahora. Intenta de nuevo."); return; }
@@ -518,7 +530,7 @@
         headers: { "Content-Type": "application/json", "X-CSRFToken": csrf() },
         body: JSON.stringify({ mesa: config.mesa, codigo: config.codigo, items: items, nota: items.length ? $("#pedido-nota").value : (motivo || "") })
       })
-        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, datos: d }; }); })
+        .then(leerRespuesta)
         .then(function (res) {
           if (!res.ok) { avisar(res.datos.error || "No pudimos avisar al mesero. Intenta de nuevo."); return; }
           if (items.length) { carrito = []; $("#pedido-nota").value = ""; guardar(); if (hoja.open) hoja.close(); }
@@ -646,7 +658,7 @@
         headers: { "Content-Type": "application/json", "X-CSRFToken": csrf() },
         body: JSON.stringify(Object.assign({ mesa: config.mesa, codigo: config.codigo }, cuerpo))
       })
-        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, datos: d }; }); })
+        .then(leerRespuesta)
         .then(function (res) {
           if (!res.ok) { avisar(res.datos.error || "No se pudo completar. Intenta de nuevo."); return; }
           pintarCuenta(res.datos.cuenta || {});
@@ -816,7 +828,7 @@
           headers: { "Content-Type": "application/json", "X-CSRFToken": csrf() },
           body: JSON.stringify({ metodo: metodoRetiro, items: itemsRetiro() })
         })
-          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, datos: j }; }); })
+          .then(leerRespuesta)
           .then(function (res) {
             if (!res.ok) { errorRetiro(1, res.datos.error || "No pudimos calcular el monto."); return; }
             pintarPago(res.datos);
@@ -844,7 +856,7 @@
         boton.disabled = true;
         boton.textContent = "Enviando…";
         fetch(config.retiro, { method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf() }, body: cuerpo })
-          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, datos: j }; }); })
+          .then(leerRespuesta)
           .then(function (res) {
             if (!res.ok) {
               if (res.datos.cotizacion) pintarPago(res.datos.cotizacion);

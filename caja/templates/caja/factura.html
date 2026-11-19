@@ -61,16 +61,23 @@
       {% endif %}
       <div class="stack obs" style="justify-content: space-between"><span>Base imponible</span><span>Bs {{ factura.base_imponible_local|intcomma }}</span></div>
       <div class="stack obs" style="justify-content: space-between"><span>IVA ({{ factura.iva_porcentaje|floatformat:0 }} %)</span><span>Bs {{ factura.iva_local|intcomma }}</span></div>
-      <div class="stack fuerte" style="justify-content: space-between"><span>Total</span><span>Bs {{ factura.total_local|intcomma }} · ${{ factura.total_usd|intcomma }}</span></div>
-      {% for p in factura.pagos.all %}
-        <div class="linea-pago">
-          <span>{{ p.get_metodo_display }}{% if p.moneda == "USD" %} · ${{ p.monto_recibido|intcomma }}{% endif %}{% if p.referencia %} · ref. {{ p.referencia }}{% endif %}{% if p.pagador %} · {{ p.pagador }}{% endif %}{% if p.vuelto_local > 0 %} · vuelto Bs {{ p.vuelto_local|intcomma }}{% endif %}</span>
-          <span class="num">− Bs {{ p.monto_local|intcomma }}</span>
+      <div class="total-factura"><span>Total</span><span><strong>Bs {{ factura.total_local|intcomma }}</strong> <span class="muted">· ${{ factura.total_usd|intcomma }}</span></span></div>
+      {% if factura.pagos.all %}
+        <div class="forma-pago">
+          <div class="obs fuerte">Forma de pago</div>
+          {% for p in factura.pagos.all %}
+            <div class="linea-pago">
+              <span>{{ p.get_metodo_display }}{% if p.moneda == "USD" %} · ${{ p.monto_recibido|intcomma }}{% endif %}{% if p.referencia %} · ref. {{ p.referencia }}{% endif %}{% if p.pagador %} · {{ p.pagador }}{% endif %}{% if p.vuelto_local > 0 %} · vuelto Bs {{ p.vuelto_local|intcomma }}{% endif %}</span>
+              <span class="num">Bs {{ p.monto_local|intcomma }}</span>
+            </div>
+            {% if p.igtf_local %}<div class="linea-pago obs"><span>IGTF ({{ igtf_porcentaje|floatformat:0 }} %) por pago en divisas</span><span class="num">Bs {{ p.igtf_local|intcomma }}</span></div>{% endif %}
+          {% endfor %}
+          {% if factura.igtf_local %}<div class="stack obs" style="justify-content: space-between"><span>Total pagado con IGTF</span><span>Bs {{ factura.total_con_igtf_local|intcomma }}</span></div>{% endif %}
         </div>
-        {% if p.igtf_local %}<div class="linea-pago obs"><span>IGTF ({{ igtf_porcentaje|floatformat:0 }} %) sobre el pago en divisas</span><span class="num">+ Bs {{ p.igtf_local|intcomma }}</span></div>{% endif %}
-      {% endfor %}
-      {% if factura.igtf_local %}<div class="stack obs" style="justify-content: space-between"><span>Total pagado con IGTF</span><span>Bs {{ factura.total_con_igtf_local|intcomma }}</span></div>{% endif %}
-      <div class="saldo"><span class="fuerte">Saldo</span><span><strong>Bs {{ saldo|intcomma }}</strong> <span class="muted">· ${{ saldo_usd|intcomma }}</span></span></div>
+      {% endif %}
+      {% if factura.estado == "ABI" and saldo > 0 %}
+        <div class="saldo no-print"><span class="fuerte">{% if factura.pagos.all %}Falta por cobrar{% else %}Por cobrar{% endif %}</span><span><strong>Bs {{ saldo|intcomma }}</strong> <span class="muted">· ${{ saldo_usd|intcomma }}</span></span></div>
+      {% endif %}
     </div>
     <p class="stack no-print" style="margin: 16px 0 0">
       <button class="btn secundario sm" type="button" onclick="window.print()">{% include "_icono.html" with nombre="imprimir" %}Imprimir comprobante</button>

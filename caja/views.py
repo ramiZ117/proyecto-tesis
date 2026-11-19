@@ -65,6 +65,8 @@ def _cuentas_abiertas(tasa):
     )
     cuentas_abiertas = []
     for pedido in pedidos:
+        if pedido.facturas_vigentes and pedido.facturas_vigentes[0].estado == Factura.Estado.PAGADA:
+            continue  # cobrado por adelantado (para llevar): solo falta entregarlo
         subtotal = sum((d.subtotal for d in pedido.items_cuenta), Decimal("0.00"))
         if pedido.mesa_id:
             solicitada = pedido.mesa.estado == Mesa.Estado.POR_FACTURAR
@@ -664,3 +666,15 @@ def en_linea_accion(request, pedido_id):
     except ValidationError as exc:
         messages.error(request, texto_validacion(exc))
     return redirect("caja:en_linea")
+
+
+
+@requiere_grupo(GRUPO_CAJA)
+def llevar(request):
+    """La caja abre y atiende los pedidos para llevar de quien llega al mostrador."""
+    from mesas.views import _para_llevar
+
+    pedidos = _para_llevar()
+    for p in pedidos:
+        p.factura_vigente = p.factura_activa
+    return render(request, "caja/llevar.html", {"llevar": pedidos})
