@@ -259,10 +259,23 @@ class Pedido(models.Model):
         if self.factura_activa:
             raise ValidationError("La cuenta ya fue facturada; no se puede modificar el pedido.")
 
+    @property
+    def se_cobra_antes(self) -> bool:
+        """Para llevar del mostrador: primero se cobra y, al quedar pagado, se envía solo a cocina.
+
+        (Los pedidos en línea ya llegan pagados y los acepta la caja; las mesas se cobran al final.)
+        """
+        return self.es_para_llevar and not self.en_linea
+
     @transaction.atomic
     def enviar_a_cocina(self) -> None:
         """Envía a cocina solo los platillos nuevos (RF-02: envío inmediato)."""
+        if self.se_cobra_antes:
+            raise ValidationError("Los pedidos para llevar se cobran primero: al cobrarlos se envían solos a cocina.")
         self._exigir_abierto()
+        self._enviar_nuevos()
+
+    def _enviar_nuevos(self) -> None:
         if not self.detalles_vigentes.exists():
             raise ValidationError("No se puede enviar a cocina un pedido sin platillos.")
         nuevos = self.sin_enviar
@@ -289,10 +302,10 @@ class Pedido(models.Model):
             raise ValidationError("Este pedido ya está cerrado o anulado.")
         if not self.detalles_vigentes.exists():
             raise ValidationError("No hay platillos que cobrar en esta mesa.")
-        if self.sin_enviar.exists():
-            raise ValidationError("Hay platillos sin enviar a cocina. Envíalos antes de pedir la cuenta.")
         if self.es_para_llevar:
             raise ValidationError("Los pedidos para llevar se cobran directo en caja.")
+        if self.sin_enviar.exists():
+            raise ValidationError("Hay platillos sin enviar a cocina. Envíalos antes de pedir la cuenta.")
         self.mesa.marcar_por_facturar()
 
     @transaction.atomic

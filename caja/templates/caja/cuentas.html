@@ -16,7 +16,7 @@
         {% if c.factura %}<span class="pill info">Facturada</span>
         {% elif c.cuenta_cliente.estado == "REP" %}<span class="pill ok">{{ c.cuenta_cliente.get_metodo_display }} reportado · por confirmar</span>
         {% elif c.cuenta_cliente %}<span class="pill FAC">Pide la cuenta · {{ c.cuenta_cliente.get_metodo_display }}</span>
-        {% elif c.solicitada %}<span class="pill FAC">{% if c.pedido.mesa_id %}Cuenta solicitada{% else %}Listo para cobrar{% endif %}</span>
+        {% elif c.solicitada %}<span class="pill FAC">{% if c.pedido.mesa_id %}Cuenta solicitada{% else %}Por cobrar{% endif %}</span>
         {% elif c.sin_enviar %}<span class="pill warn">Sin enviar</span>
         {% else %}<span class="pill ocu">En servicio</span>{% endif %}
       </div>
@@ -24,7 +24,7 @@
       <div>
         {% for d in c.items %}
           <div class="item">
-            <span>{{ d.cantidad }} × {{ d.producto.nombre }}{% if not d.enviado %} <span class="pill warn">Sin enviar</span>{% endif %}{% if d.observaciones %}<span class="obs" style="display:block">{{ d.observaciones }}</span>{% endif %}</span>
+            <span>{{ d.cantidad }} × {{ d.producto.nombre }}{% if not d.enviado and c.pedido.mesa_id %} <span class="pill warn">Sin enviar</span>{% endif %}{% if d.observaciones %}<span class="obs" style="display:block">{{ d.observaciones }}</span>{% endif %}</span>
             <span class="num">Bs {{ d.subtotal|intcomma }}</span>
           </div>
         {% empty %}

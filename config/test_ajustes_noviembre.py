@@ -150,10 +150,14 @@ class CajaParaLlevarTests(DatosBase):
         self.assertContains(r, "Pedidos para llevar")  # la comanda se ve en la pantalla de caja, no en el salón
         caja.post(f"/mesas/comanda/{pedido.pk}/agregar/", {"producto_id": self.bistec.pk, "cantidad": "1"})
         caja.post(f"/mesas/comanda/{pedido.pk}/agregar/", {"producto_id": self.agua.pk, "cantidad": "2"})
-        caja.post(f"/mesas/comanda/{pedido.pk}/enviar/")
-        self.assertContains(self.cliente(self.chef).get("/cocina/"), "Luis")
-        # cobra de inmediato (como en el mostrador): el pedido NO desaparece de cocina
-        self.assertContains(caja.get(f"/mesas/comanda/{pedido.pk}/"), "Cobrar ahora")
+        # Para llevar se cobra primero: «Enviar a cocina» no está y, si se fuerza, se rechaza.
+        comanda = caja.get(f"/mesas/comanda/{pedido.pk}/")
+        self.assertContains(comanda, "Cobrar y enviar a cocina")
+        self.assertNotContains(comanda, "Enviar a cocina (")
+        r = caja.post(f"/mesas/comanda/{pedido.pk}/enviar/", follow=True)
+        self.assertContains(r, "se cobran primero")
+        self.assertNotContains(self.cliente(self.chef).get("/cocina/"), "Luis")
+        self.assertContains(caja.get("/caja/"), "Por cobrar")
         r = caja.post(f"/caja/pedido/{pedido.pk}/facturar/", follow=True)
         factura = pedido.facturas.get()
         caja.post(f"/caja/factura/{factura.pk}/pago/", {"metodo": "EFE", "monto_recibido": str(factura.total_local)})
@@ -161,6 +165,7 @@ class CajaParaLlevarTests(DatosBase):
         pedido.refresh_from_db()
         self.assertEqual(factura.estado, Factura.Estado.PAGADA)
         self.assertNotEqual(pedido.estado, Pedido.Estado.CERRADO)
+        self.assertFalse(pedido.sin_enviar.exists())  # pagado: se envió solo a cocina
         self.assertContains(self.cliente(self.chef).get("/cocina/"), "Luis")
         self.assertNotContains(caja.get("/caja/"), "Luis")  # ya no es una cuenta por cobrar
         self.assertContains(caja.get("/caja/para-llevar/"), "Pagado")

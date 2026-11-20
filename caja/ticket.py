@@ -59,8 +59,6 @@ def encabezado_local() -> list[str]:
     for parte in settings.RESTAURANTE_DIRECCION_FISCAL.split("|"):
         if parte.strip():
             lineas += centro(parte.strip().upper())
-    if settings.RESTAURANTE_TELEFONO:
-        lineas += centro(f"TELF: {settings.RESTAURANTE_TELEFONO}")
     return lineas
 
 

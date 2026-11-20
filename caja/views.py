@@ -74,7 +74,7 @@ def _cuentas_abiertas(tasa):
         if pedido.mesa_id:
             solicitada = pedido.mesa.estado == Mesa.Estado.POR_FACTURAR
         else:
-            solicitada = pedido.estado in {Pedido.Estado.LISTO, Pedido.Estado.ENTREGADO}
+            solicitada = bool(pedido.items_cuenta)  # para llevar: el cliente espera en el mostrador para pagar
         cuentas_abiertas.append(
             {
                 "pedido": pedido,
@@ -84,7 +84,8 @@ def _cuentas_abiertas(tasa):
                 "usd": tasa.a_usd(subtotal) if tasa else None,
                 "factura": pedido.facturas_vigentes[0] if pedido.facturas_vigentes else None,
                 "solicitada": solicitada,
-                "sin_enviar": any(not d.enviado for d in pedido.items_cuenta),
+                # Para llevar se cobra antes de mandarlo a cocina: lo «sin enviar» no impide facturar.
+                "sin_enviar": bool(pedido.mesa_id) and any(not d.enviado for d in pedido.items_cuenta),
                 "cuenta_cliente": pedido.cuenta_cliente[0] if pedido.cuenta_cliente else None,
             }
         )

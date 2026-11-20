@@ -94,7 +94,7 @@
       <form class="card pila" method="post" action="{% url 'caja:pago' factura.pk %}" id="pago" data-cobro data-saldo="{{ saldo|unlocalize }}" data-tasa="{{ factura.tasa_cambio|unlocalize }}" data-igtf="{{ igtf_porcentaje|unlocalize }}" data-igtf-metodos="{{ igtf_metodos }}">
         {% csrf_token %}
         <h2 style="margin:0">Registrar pago</h2>
-        <p class="obs" style="margin:0">Cobra el total de la mesa. Si cada quien paga lo suyo, abre «Dividir la cuenta».</p>
+        <p class="obs" style="margin:0">{% if factura.pedido.se_cobra_antes %}Pedido para llevar: al quedar pagado se envía solo a cocina.{% else %}Cobra el total de la mesa. Si cada quien paga lo suyo, abre «Dividir la cuenta».{% endif %}</p>
         <fieldset style="border:0; padding:0; margin:0">
           <legend class="oculto">Método de pago</legend>
           <div class="metodos">
@@ -287,7 +287,7 @@
         <div class="exito">
           <div class="circulo"><svg aria-hidden="true" width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
           <h2 style="margin:0; font-size:22px">Cuenta saldada</h2>
-          <p class="obs" style="margin:0">{% if factura.pedido.mesa_id %}{{ factura.pedido.mesa }} pasó a <strong>por limpiar</strong>.{% else %}Pedido para llevar entregado y cobrado.{% endif %}<br>Inventario descontado según las recetas.</p>
+          <p class="obs" style="margin:0">{% if factura.pedido.mesa_id %}{{ factura.pedido.mesa }} pasó a <strong>por limpiar</strong>.{% else %}Pedido para llevar cobrado y enviado a cocina.{% endif %}<br>Inventario descontado según las recetas.</p>
           {% if ultimo_vuelto %}<div class="vuelto">Entregar vuelto: Bs {{ ultimo_vuelto|intcomma }}</div>{% endif %}
           <a class="btn oscuro" href="{% url 'caja:cuentas' %}">Siguiente cuenta</a>
         </div>

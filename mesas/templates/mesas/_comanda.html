@@ -203,12 +203,14 @@
       <span><strong>{% if subtotal_usd is not None %}${{ subtotal_usd|intcomma }}{% else %}Bs {{ pedido.subtotal|intcomma }}{% endif %}</strong>{% if subtotal_usd is not None %} <span class="muted">· Bs {{ pedido.subtotal|intcomma }}</span>{% endif %}</span>
     </div>
     <div class="stack">
+      {% if not pedido.es_para_llevar %}
       <form method="post" action="{% url 'mesas:enviar' pedido.pk %}" style="flex: 2 1 200px; display: flex">
         {% csrf_token %}
         <button class="btn grande bloque" type="submit"{% if not hay_sin_enviar or facturado %} disabled{% endif %}>
           {% include "_icono.html" with nombre="cocina" %}{% if hay_sin_enviar %}Enviar a cocina ({{ nuevos }}){% else %}Nada nuevo que enviar{% endif %}
         </button>
       </form>
+      {% endif %}
       {% if not pedido.es_para_llevar and es_mesero %}
         <form method="post" action="{% url 'mesas:cuenta' pedido.pk %}" style="flex: 1 1 140px; display: flex">
           {% csrf_token %}
@@ -225,16 +227,17 @@
       {% endif %}
     </div>
     {% if pedido.es_para_llevar %}
-      {% if es_cajero and detalles and not hay_sin_enviar %}
-        {% if facturado %}
-          <a class="btn grande azul bloque" href="{% url 'caja:factura' facturado.pk %}">{% if facturado.estado == "PAG" %}Ver factura (pagada){% else %}Ir a cobrar{% endif %}</a>
-        {% else %}
+      {% if facturado %}
+        {% if es_cajero %}<a class="btn grande azul bloque" href="{% url 'caja:factura' facturado.pk %}">{% if facturado.estado == "PAG" %}Ver factura (pagada){% else %}Ir a cobrar{% endif %}</a>{% endif %}
+        {% if facturado.estado == "PAG" %}<p class="obs" style="margin:0">Pagado y enviado a cocina. Se cierra al entregarlo.</p>{% endif %}
+      {% elif detalles %}
+        {% if es_cajero %}
           <form method="post" action="{% url 'caja:emitir' pedido.pk %}" style="display: flex">
-            {% csrf_token %}<button class="btn grande azul bloque" type="submit">{% include "_icono.html" with nombre="caja" %}Cobrar ahora</button>
+            {% csrf_token %}<button class="btn grande azul bloque" type="submit">{% include "_icono.html" with nombre="caja" %}Cobrar y enviar a cocina</button>
           </form>
         {% endif %}
+        <p class="obs" style="margin:0">Los pedidos para llevar se cobran primero: al quedar pagados se envían solos a cocina.</p>
       {% endif %}
-      <p class="obs" style="margin:0">Se puede cobrar antes o después de que cocina lo prepare: el pedido sigue en cocina hasta que se entrega.</p>
     {% endif %}
     <div class="stack" style="justify-content: space-between">
       <a class="ghost" href="{{ volver_url|default:'/mesas/' }}">← {{ volver_texto|default:"Volver al mapa" }}</a>

@@ -26,7 +26,7 @@ def enviar_factura(factura) -> tuple[bool, str]:
         "titulo": f"Factura {factura.numero}",
         "saludo": f"Gracias por tu visita a {settings.RESTAURANTE_NOMBRE}. Esta es tu factura:",
         "ticket": ticket_factura(factura),
-        "pie": f"{settings.RESTAURANTE_DIRECCION} · {settings.RESTAURANTE_TELEFONO}",
+        "pie": settings.RESTAURANTE_DIRECCION,
     }
     mensaje = EmailMultiAlternatives(
         subject=f"Tu factura {factura.numero} · {settings.RESTAURANTE_NOMBRE}",

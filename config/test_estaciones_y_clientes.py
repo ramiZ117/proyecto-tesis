@@ -3,6 +3,7 @@
 import json
 from decimal import Decimal
 
+from django.conf import settings
 from django.contrib.auth.models import Group, User
 from django.core import mail
 from django.test import override_settings
@@ -207,6 +208,8 @@ class TicketFacturaTests(_Estaciones):
         texto = ticket_factura(f)
         lineas = texto.splitlines()
         self.assertNotIn("SENIAT", texto)
+        self.assertNotIn("TELF", texto)  # la factura no lleva el teléfono del local
+        self.assertNotIn(settings.RESTAURANTE_TELEFONO, texto)
         self.assertEqual(lineas[0].strip(), "RIF J-317688600")
         self.assertEqual(lineas[1].strip(), "COMIDA ARABE EL AMIR, C.A")
         for esperado in ("CALLE BOLIVAR LOCAL NRO 133", "SECTOR CENTRO", "PUERTO LA CRUZ - EDO ANZOATEGUI",

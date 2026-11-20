@@ -57,15 +57,16 @@ class ParaLlevarTests(DatosBase):
         c.post("/mesas/llevar/nuevo/", {"cliente": "Carlos"})
         pedido = Pedido.objects.get(tipo=Pedido.Tipo.LLEVAR)
         c.post(f"/mesas/comanda/{pedido.pk}/agregar/", {"producto_id": self.hamburguesa.pk, "cantidad": 2})
-        c.post(f"/mesas/comanda/{pedido.pk}/enviar/")
+        with self.assertRaisesMessage(ValidationError, "se cobran primero"):
+            pedido.enviar_a_cocina()
         with self.assertRaisesMessage(ValidationError, "directo en caja"):
             pedido.solicitar_cuenta()
-        self.assertContains(self.cliente(self.chef).get("/cocina/"), f"Llevar {pedido.codigo}")
+        self.assertNotContains(self.cliente(self.chef).get("/cocina/"), f"Llevar {pedido.codigo}")
         caja = self.cliente(self.cajero).get("/caja/")
         self.assertContains(caja, f"Llevar {pedido.codigo}")
         factura = _cobrar(pedido, self.cajero)
         pedido.refresh_from_db()
-        # Cobrado en el mostrador antes de estar listo: sigue en cocina hasta que se entrega.
+        # Cobrado en el mostrador: recién entonces va a cocina, y sigue ahí hasta que se entrega.
         self.assertEqual(factura.estado, Factura.Estado.PAGADA)
         self.assertNotEqual(pedido.estado, Pedido.Estado.CERRADO)
         self.assertContains(self.cliente(self.chef).get("/cocina/"), f"Llevar {pedido.codigo}")
@@ -77,7 +78,7 @@ class ParaLlevarTests(DatosBase):
         self.assertEqual(pedido.estado, Pedido.Estado.CERRADO)
         self.res.refresh_from_db()
         self.assertEqual(self.res.stock_actual, Decimal("9.600"))  # receta descontada
-        self.assertContains(self.cliente(self.cajero).get(f"/caja/factura/{factura.pk}/"), "Pedido para llevar entregado")
+        self.assertContains(self.cliente(self.cajero).get(f"/caja/factura/{factura.pk}/"), "Pedido para llevar cobrado y enviado a cocina")
 
     def test_anular_un_pedido_para_llevar(self):
         pedido = Pedido.crear_para_llevar("Ana", self.mesero)

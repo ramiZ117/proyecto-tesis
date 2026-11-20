@@ -205,7 +205,7 @@ class Factura(models.Model):
         vigentes = pedido.detalles_vigentes
         if not vigentes.exists():
             raise ValidationError("El pedido no tiene platillos; no hay nada que facturar.")
-        if vigentes.filter(enviado=False).exists():
+        if vigentes.filter(enviado=False).exists() and not pedido.se_cobra_antes:
             raise ValidationError("Hay platillos sin enviar a cocina; el mesero debe enviarlos antes de facturar.")
         total_local = _redondear(pedido.subtotal)
         if total_local <= 0:
@@ -387,6 +387,8 @@ class Factura(models.Model):
         self.save(update_fields=["estado", "pagada_en"])
         if self.pedido.en_linea:
             return  # se pagó por adelantado: la comanda se cierra cuando el cliente la retira
+        if self.pedido.se_cobra_antes and self.pedido.sin_enviar.exists():
+            self.pedido._enviar_nuevos()  # para llevar: pagado, ahora sí va a cocina
         if self.pedido.es_para_llevar and self.pedido.detalles_vigentes.exclude(estado="ENT").exists():
             return  # cobrado en el mostrador: sigue en cocina y se cierra al entregarlo
         self.pedido.estado = Pedido.Estado.CERRADO
