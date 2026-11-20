@@ -153,3 +153,39 @@ class NavegadorTests(StaticLiveServerTestCase):
         self.mesa.refresh_from_db()
         self.assertEqual(self.mesa.estado, Mesa.Estado.POR_LIMPIAR)
         self.assertEqual(self.errores_js, [])
+
+    def test_pago_mixto_con_financiado_calcula_lo_que_falta(self):
+        from caja.models import Factura, FinanciamientoCashea
+
+        cajero = User.objects.get(username="cajero1")
+        pedido = Pedido.objects.create(mesa=self.mesa, mesero=self.mesero)
+        self.mesa.ocupar()
+        shawarma = Producto.objects.get(nombre="Shawarma de pollo")
+        DetallePedido.objects.create(pedido=pedido, producto=shawarma, cantidad=50, precio_unitario=shawarma.precio_local)
+        pedido.enviar_a_cocina()
+        factura = Factura.emitir_desde_pedido(pedido, cajero)  # 50 × $6 × 40 = Bs 12.000
+
+        caja = self.pagina("cajero1")
+        caja.goto(f"{self.live_server_url}/caja/factura/{factura.pk}/")
+        caja.check("#metodo-PMO")
+        caja.fill("#monto_recibido", "8000")
+        caja.fill("#referencia", "4455")
+        caja.click("[data-agregar-pago]")
+        fila = caja.locator("[data-fila-pago]:not([hidden])").first
+        fila.locator("select[name=metodo]").select_option("CAS")
+        # Faltan Bs 4.000 = $100 a tasa 40: se llena solo, en dólares.
+        self.assertEqual(fila.locator("input[name=monto_recibido]").input_value(), "100,00")
+        self.assertEqual(fila.locator("input[name=monto_recibido]").get_attribute("placeholder"), "Monto en $")
+        self.assertEqual(fila.locator("input[name=referencia]").get_attribute("placeholder"), "N.º de orden (obligatorio)")
+        # Si cambia la inicial, lo financiado se recalcula.
+        caja.fill("#monto_recibido", "6000")
+        self.assertEqual(fila.locator("input[name=monto_recibido]").input_value(), "150,00")
+        self.assertEqual(caja.inner_text("[data-cobrar]"), "Cobrar y cerrar cuenta")
+        fila.locator("input[name=referencia]").fill("CSH-777")
+        caja.click("[data-cobrar]")
+        caja.wait_for_selector("text=Cuenta saldada")
+        factura.refresh_from_db()
+        self.assertEqual(factura.estado, Factura.Estado.PAGADA)
+        fin = FinanciamientoCashea.objects.get()
+        self.assertEqual((fin.orden, fin.monto_usd), ("CSH-777", Decimal("150.00")))
+        self.assertEqual(self.errores_js, [])

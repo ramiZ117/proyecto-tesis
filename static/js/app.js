@@ -514,9 +514,58 @@
     });
   }
 
+  /* Pago mixto: la fila adicional se llena sola con lo que falta, en la moneda de su método
+     (dólares para Financiado, Divisa, Binance y Zinli; bolívares para el resto). Si el cajero
+     escribe el monto a mano, se respeta y ya no se recalcula. */
+  function pintarFila(fila) {
+    var metodo = fila.querySelector("[name=metodo]").value;
+    var monto = fila.querySelector("[name=monto_recibido]");
+    var ref = fila.querySelector("[name=referencia]");
+    monto.placeholder = enDolares(metodo) ? "Monto en $" : "Monto en Bs";
+    if (ref) {
+      ref.placeholder = metodo === "CAS" ? "N.º de orden (obligatorio)" : "Referencia";
+      ref.required = metodo === "CAS" && !fila.hidden;
+    }
+  }
+
+  function autocompletarFila(form, fila) {
+    if (fila.hidden || fila.getAttribute("data-auto") === "0") return;
+    var saldo = numero(form.getAttribute("data-saldo"));
+    var tasa = numero(form.getAttribute("data-tasa"));
+    var igtf = numero(form.getAttribute("data-igtf"));
+    var conIgtf = (form.getAttribute("data-igtf-metodos") || "").split(",");
+    var marcado = form.querySelector("input[name=metodo]:checked");
+    var otras = [{ metodo: marcado ? marcado.value : "EFE", monto: numero((form.querySelector("#monto_recibido") || {}).value) }];
+    form.querySelectorAll("[data-fila-pago]:not([hidden])").forEach(function (f) {
+      if (f === fila) return;
+      var m = numero(f.querySelector("[name=monto_recibido]").value);
+      if (m > 0) otras.push({ metodo: f.querySelector("[name=metodo]").value, monto: m });
+    });
+    var r = simularCobro(otras.filter(function (o) { return o.monto > 0; }), saldo, tasa, igtf, conIgtf);
+    var metodo = fila.querySelector("[name=metodo]").value;
+    var campo = fila.querySelector("[name=monto_recibido]");
+    if (r.error || r.restante <= 0.004 || !tasa) { campo.value = ""; return; }
+    var valor;
+    if (conIgtf.indexOf(metodo) >= 0) valor = Math.ceil(r.restante * (1 + igtf / 100) / tasa * 100) / 100;
+    else if (enDolares(metodo)) valor = Math.round(r.restante / tasa * 100) / 100;
+    else valor = Math.round(r.restante * 100) / 100;
+    campo.value = valor.toFixed(2).replace(".", ",");
+  }
+
+  function actualizarFilas(form, editada) {
+    form.querySelectorAll("[data-fila-pago]:not([hidden])").forEach(function (fila) {
+      pintarFila(fila);
+      if (fila !== editada) autocompletarFila(form, fila);
+    });
+  }
+
   document.addEventListener("input", function (e) {
     var form = e.target.closest && e.target.closest("form[data-cobro]");
-    if (form) recalcularCobro(form);
+    if (!form) return;
+    var fila = e.target.closest("[data-fila-pago]");
+    if (fila && e.target.name === "monto_recibido") fila.setAttribute("data-auto", e.target.value.trim() ? "0" : "1");
+    actualizarFilas(form, fila);
+    recalcularCobro(form);
   });
   document.addEventListener("change", function (e) {
     var form = e.target.closest && e.target.closest("form[data-cobro]");
@@ -527,6 +576,13 @@
       var igtfM = (form.getAttribute("data-igtf-metodos") || "").split(",");
       if (exacto && campo) campo.value = exacto.getAttribute(igtfM.indexOf(e.target.value) >= 0 ? "data-usd-igtf" : enDolares(e.target.value) ? "data-usd" : "data-bs");
     }
+    var filaCambiada = e.target.closest("[data-fila-pago]");
+    if (filaCambiada && e.target.tagName === "SELECT") {
+      filaCambiada.setAttribute("data-auto", "1");  // al cambiar de método se vuelve a calcular lo que falta
+      pintarFila(filaCambiada);
+      autocompletarFila(form, filaCambiada);
+    }
+    actualizarFilas(form, filaCambiada);
     recalcularCobro(form);
   });
   document.addEventListener("click", function (e) {
@@ -537,7 +593,10 @@
       if (libre) {
         libre.hidden = false;
         libre.querySelectorAll("select, input").forEach(function (c) { c.disabled = false; });
-        libre.querySelector("[name=monto_recibido]").focus();
+        libre.setAttribute("data-auto", "1");
+        pintarFila(libre);
+        autocompletarFila(formA, libre);
+        libre.querySelector("[name=metodo]").focus();  // primero se elige el método; el monto ya viene calculado
       }
       agregar.hidden = !formA.querySelector("[data-fila-pago][hidden]");
       recalcularCobro(formA);
@@ -548,8 +607,10 @@
       var fila = quitar.closest("[data-fila-pago]");
       var formQ = quitar.closest("form[data-cobro]");
       fila.hidden = true;
-      fila.querySelectorAll("select, input").forEach(function (c) { c.disabled = true; if (c.tagName === "INPUT") c.value = ""; });
+      fila.querySelectorAll("select, input").forEach(function (c) { c.disabled = true; c.required = false; if (c.tagName === "INPUT") c.value = ""; });
+      fila.setAttribute("data-auto", "1");
       formQ.querySelector("[data-agregar-pago]").hidden = false;
+      actualizarFilas(formQ, null);
       recalcularCobro(formQ);
       return;
     }
@@ -560,6 +621,7 @@
     var esUsd = marcado && enDolares(marcado.value);
     var conIgtfR = marcado && (form.getAttribute("data-igtf-metodos") || "").split(",").indexOf(marcado.value) >= 0;
     form.querySelector("#monto_recibido").value = b.getAttribute(conIgtfR && b.hasAttribute("data-usd-igtf") ? "data-usd-igtf" : esUsd ? "data-usd" : "data-bs");
+    actualizarFilas(form, null);
     recalcularCobro(form);
   });
 
