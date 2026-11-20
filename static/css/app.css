@@ -429,10 +429,11 @@ details.opcional > summary::after { content: "+"; margin-left: auto; font-size: 
 details.opcional[open] > summary::after { content: "−"; }
 .pagos-extra { display: flex; flex-direction: column; gap: 8px; }
 .pagos-extra:not(:has(.fila-pago:not([hidden]))) { display: none; }
-.fila-pago { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 8px; border-radius: 12px; background: var(--superficie-2); animation: entrar .3s ease both; }
+.fila-pago { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 8px; border-radius: 12px; background: var(--superficie-2); animation: entrar .3s ease both; }
 .fila-pago[hidden] { display: none; }
 .fila-pago select, .fila-pago input { min-height: 42px; padding: 8px 10px; font-size: 14px; }
-@media (max-width: 480px) { .fila-pago { grid-template-columns: 1fr 1fr auto; } .fila-pago input[name=referencia] { grid-column: 1 / 3; } }
+.fila-pago input[name=referencia] { grid-column: 1 / 3; }  /* fila 1: método · monto · Restante; fila 2: referencia · ✕ */
+.fila-pago [data-restante] { min-height: 42px; white-space: nowrap; }
 .saldo-mesero { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 16px; border-radius: 18px; background: var(--superficie); border: 1px solid var(--borde); }
 .saldo-mesero strong.monto { font-size: 22px; font-weight: 800; }
 .comensales { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }

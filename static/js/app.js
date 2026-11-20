@@ -593,6 +593,9 @@
       if (libre) {
         libre.hidden = false;
         libre.querySelectorAll("select, input").forEach(function (c) { c.disabled = false; });
+        formA.querySelectorAll("[data-fila-pago]:not([hidden])").forEach(function (f) {
+          if (f !== libre) f.setAttribute("data-auto", "0");
+        });
         libre.setAttribute("data-auto", "1");
         pintarFila(libre);
         autocompletarFila(formA, libre);
@@ -600,6 +603,19 @@
       }
       agregar.hidden = !formA.querySelector("[data-fila-pago][hidden]");
       recalcularCobro(formA);
+      return;
+    }
+    var restante = e.target.closest && e.target.closest("[data-restante]");
+    if (restante) {
+      /* «Restante»: esta fila toma lo que falta; las demás filas adicionales quedan con el monto que tienen. */
+      var formR = restante.closest("form[data-cobro]");
+      var filaR = restante.closest("[data-fila-pago]");
+      formR.querySelectorAll("[data-fila-pago]:not([hidden])").forEach(function (f) {
+        if (f !== filaR) f.setAttribute("data-auto", "0");
+      });
+      filaR.setAttribute("data-auto", "1");
+      autocompletarFila(formR, filaR);
+      recalcularCobro(formR);
       return;
     }
     var quitar = e.target.closest && e.target.closest("[data-quitar-fila]");

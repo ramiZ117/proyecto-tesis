@@ -132,6 +132,7 @@
                 {% for clave, nombre, ayuda in metodos %}<option value="{{ clave }}">{{ nombre }}</option>{% endfor %}
               </select>
               <input name="monto_recibido" type="text" inputmode="decimal" placeholder="Monto" aria-label="Monto del pago adicional" disabled>
+              <button class="btn sm secundario" type="button" data-restante title="Poner lo que falta por cobrar">Restante</button>
               <input name="referencia" maxlength="60" placeholder="Referencia" aria-label="Referencia del pago adicional" disabled>
               <button class="ghost" type="button" data-quitar-fila aria-label="Quitar este pago">✕</button>
             </div>

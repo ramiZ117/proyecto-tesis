@@ -181,6 +181,22 @@ class NavegadorTests(StaticLiveServerTestCase):
         caja.fill("#monto_recibido", "6000")
         self.assertEqual(fila.locator("input[name=monto_recibido]").input_value(), "150,00")
         self.assertEqual(caja.inner_text("[data-cobrar]"), "Cobrar y cerrar cuenta")
+        # Tres métodos: la segunda fila con un monto escrito a mano y la tercera con el botón «Restante».
+        fila.locator("select[name=metodo]").select_option("EFE")
+        fila.locator("input[name=monto_recibido]").fill("2000")
+        caja.click("[data-agregar-pago]")
+        tercera = caja.locator("[data-fila-pago]").nth(1)  # posición fija: sigue siendo la misma fila al quitar otra
+        tercera.locator("select[name=metodo]").select_option("CAS")
+        self.assertEqual(tercera.locator("input[name=monto_recibido]").input_value(), "100,00")  # 12.000 − 6.000 − 2.000
+        tercera.locator("input[name=monto_recibido]").fill("1")
+        tercera.locator("[data-restante]").click()
+        self.assertEqual(tercera.locator("input[name=monto_recibido]").input_value(), "100,00")
+        self.assertEqual(fila.locator("input[name=monto_recibido]").input_value(), "2000")  # la fila escrita a mano no cambia
+        # Se quita el efectivo y «Restante» vuelve a poner lo que falta.
+        fila.locator("[data-quitar-fila]").click()
+        tercera.locator("[data-restante]").click()
+        self.assertEqual(tercera.locator("input[name=monto_recibido]").input_value(), "150,00")
+        fila = tercera
         fila.locator("input[name=referencia]").fill("CSH-777")
         caja.click("[data-cobrar]")
         caja.wait_for_selector("text=Cuenta saldada")

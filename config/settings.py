@@ -39,7 +39,7 @@ if not SECRET_KEY:
 
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if h.strip()]
 
-VERSION_APP = "2.2.0"
+VERSION_APP = "2.2.1"
 
 # CSRF: orígenes desde los que se aceptan formularios (p. ej. http://192.168.1.10:8000 en la red del local).
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.environ.get("DJANGO_CSRF_ORIGINS", "").split(",") if o.strip()]
