@@ -138,13 +138,14 @@
           {% endfor %}
         </div>
         <button class="btn sm secundario" type="button" data-agregar-pago>{% include "_icono.html" with nombre="mas" grosor="2.4" %}Agregar otro método (pago mixto)</button>
-        <p class="hint" style="margin: -6px 0 0">Divisa, Binance y Zinli van en USD; el resto en bolívares. La divisa en efectivo paga además el IGTF ({{ igtf_porcentaje|floatformat:0 }} %). El vuelto sale del pago en efectivo.</p>
+        {% if cashea_activo %}<p class="hint" style="margin: -6px 0 0"><strong>Venta financiada:</strong> cobra la inicial con su método y agrega «Financiado» por el monto financiado en $, con el número de orden. Lo financiado queda por cobrar hasta el miércoles.</p>{% endif %}
+        <p class="hint" style="margin: -6px 0 0">Divisa, Binance, Zinli y lo financiado van en USD; el resto en bolívares. La divisa en efectivo paga además el IGTF ({{ igtf_porcentaje|floatformat:0 }} %). El vuelto sale del pago en efectivo.</p>
 
         <details class="desplegable" data-propina>
           <summary>Propina para {{ factura.pedido.mesero.username }}</summary>
           <div class="stack" style="padding-top: 6px">
             <select name="propina_metodo" aria-label="Cómo dejó la propina" style="flex: 1 1 150px">
-              {% for clave, nombre, ayuda in metodos %}<option value="{{ clave }}">{{ nombre }}</option>{% endfor %}
+              {% for clave, nombre, ayuda in metodos_propina %}<option value="{{ clave }}">{{ nombre }}</option>{% endfor %}
             </select>
             <input name="propina_monto" type="text" inputmode="decimal" placeholder="Monto (en $ si es divisa)" aria-label="Monto de la propina" style="flex: 1 1 150px">
           </div>
@@ -298,7 +299,7 @@
         {% endfor %}
         <div class="stack">
           <select name="propina_metodo" aria-label="Cómo dejó la propina" style="flex: 1 1 140px">
-            {% for clave, nombre, ayuda in metodos %}<option value="{{ clave }}">{{ nombre }}</option>{% endfor %}
+            {% for clave, nombre, ayuda in metodos_propina %}<option value="{{ clave }}">{{ nombre }}</option>{% endfor %}
           </select>
           <input name="propina_monto" type="text" inputmode="decimal" required placeholder="Monto" aria-label="Monto de la propina" style="flex: 1 1 110px">
           <button class="btn sm" type="submit">Registrar</button>

@@ -31,8 +31,10 @@
       <div class="resta"><dt>Mermas <span class="obs">(insumos perdidos)</span></dt><dd>− ${{ r.mermas|intcomma }}</dd></div>
       <div class="resta"><dt>Gastos fijos del mes</dt><dd>− ${{ r.total_fijos|intcomma }}</dd></div>
       <div class="resta"><dt>Gastos extraordinarios <span class="obs">(cuota del mes)</span></dt><dd>− ${{ r.total_extraordinarios|intcomma }}</dd></div>
+      {% if r.comision_cashea %}<div class="resta"><dt>Comisión de Cashea <span class="obs">(lo que retuvo en sus pagos)</span></dt><dd>− ${{ r.comision_cashea|intcomma }}</dd></div>{% endif %}
       <div class="total {% if r.ganancia_neta < 0 %}perdida{% endif %}"><dt>{% if r.ganancia_neta < 0 %}Pérdida del mes{% else %}Ganancia neta{% endif %}</dt><dd>${{ r.ganancia_neta|intcomma }}</dd></div>
     </dl>
+    {% if r.cashea_por_cobrar %}<p class="hint" style="margin: 8px 0 0">Cashea le debe hoy al local <strong>${{ r.cashea_por_cobrar|intcomma }}</strong> de ventas financiadas (ya contadas como venta). Detalle en <a href="{% url 'caja:cashea' %}">Cashea por cobrar</a>.</p>{% endif %}
     <p class="hint" style="margin: 8px 0 0">El IVA y el IGTF se le pagan al fisco y las propinas son de los meseros: no se cuentan como ingreso del local.</p>
 
     <h3 style="margin-top: 22px">Ganancia por plato</h3>

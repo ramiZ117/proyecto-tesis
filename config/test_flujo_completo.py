@@ -104,7 +104,7 @@ class FlujoCompletoTests(DatosBase):
         self.assertEqual(TasaCambio.objects.get(activa=True).valor, Decimal("41.5000"))
 
     def test_reposicion_con_valores_invalidos(self):
-        caja = self.cliente(self.cajero)
+        caja = self.cliente(self.admin)
         for basura in ("Infinity", "NaN", "1e999", "99999999", "abc"):
             r = caja.post("/inventario/entrada/", {"insumo_id": self.pan.pk, "cantidad": basura})
             self.assertEqual(r.status_code, 302, basura)

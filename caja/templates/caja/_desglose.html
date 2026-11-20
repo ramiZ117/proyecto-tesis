@@ -10,6 +10,12 @@
   <div class="kpi"><small>IVA</small><strong>Bs {{ datos.iva_local|intcomma }}</strong><span>Incluido en los precios</span></div>
   <div class="kpi"><small>IGTF</small><strong>Bs {{ datos.igtf_local|intcomma }}</strong><span>Cobrado aparte en pagos con divisas</span></div>
 </div>
+{% if datos.financiado_local %}
+<div class="grid-auto" style="--min: 240px; margin-bottom: 16px">
+  <div class="kpi"><small>Financiado</small><strong>${{ datos.financiado_usd|intcomma }}</strong><span>Bs {{ datos.financiado_local|intcomma }} · no entró a la caja: Cashea lo paga el miércoles</span></div>
+  <div class="kpi"><small>Recibido en caja</small><strong>Bs {{ datos.recibido_local|intcomma }}</strong><span>Cobrado menos lo financiado</span></div>
+</div>
+{% endif %}
 {% if datos.descuentos_local or datos.propinas %}
 <div class="grid-auto" style="--min: 240px; margin-bottom: 16px">
   {% if datos.descuentos_local %}<div class="kpi"><small>Descuentos otorgados</small><strong>Bs {{ datos.descuentos_local|intcomma }}</strong><span>Ya restados de las facturas</span></div>{% endif %}

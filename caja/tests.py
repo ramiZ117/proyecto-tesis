@@ -95,7 +95,7 @@ class PagosTests(DatosBase):
         return Factura.emitir_desde_pedido(pedido, self.cajero)
 
     def test_los_metodos_disponibles_son_los_del_requisito(self):
-        self.assertEqual(sorted(Pago.Metodo.values), sorted(["EFE", "PMO", "DIV", "TAR", "BIN", "ZIN"]))
+        self.assertEqual(sorted(Pago.Metodo.values), sorted(["EFE", "PMO", "DIV", "TAR", "BIN", "ZIN", "CAS"]))
 
     def test_pago_total_en_efectivo_cierra_cuenta_y_deja_la_mesa_por_limpiar(self):
         f = self.factura()

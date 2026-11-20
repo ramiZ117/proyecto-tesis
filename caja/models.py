@@ -289,6 +289,8 @@ class Factura(models.Model):
         )
         pago.clean()
         pago.save()
+        if pago.metodo == Pago.Metodo.CASHEA:
+            FinanciamientoCashea.desde_pago(pago)  # queda por cobrar hasta que Cashea pague el miércoles
         if factura.saldo_local <= Decimal("0.00"):
             factura.registrar_pago_completo_y_cerrar()
         return pago, factura
@@ -434,6 +436,10 @@ class Factura(models.Model):
 
         estaba_pagada = factura.estado == self.Estado.PAGADA
         devoluciones = [Devolucion.desde_pago(pago, motivo, usuario) for pago in pagos]
+        # Lo financiado por Cashea no se le devuelve al cliente en caja: la orden se anula ante Cashea.
+        for financiamiento in FinanciamientoCashea.objects.filter(factura=factura).exclude(
+                estado=FinanciamientoCashea.Estado.ANULADO):
+            financiamiento.anular()
         factura.estado = self.Estado.ANULADA
         factura.anulada_en = timezone.now()
         factura.motivo_anulacion = motivo.strip()[:200]
@@ -533,9 +539,10 @@ class Pago(models.Model):
         TARJETA = "TAR", "Tarjeta (Bs.)"
         BINANCE = "BIN", "Binance Pay (USD)"
         ZINLI = "ZIN", "Zinli (USD)"
+        CASHEA = "CAS", "Financiado (USD)"
 
-    METODOS_USD = {Metodo.DIVISA, Metodo.BINANCE, Metodo.ZINLI}
-    METODOS_CON_REFERENCIA = {Metodo.PAGO_MOVIL, Metodo.TARJETA, Metodo.BINANCE, Metodo.ZINLI}
+    METODOS_USD = {Metodo.DIVISA, Metodo.BINANCE, Metodo.ZINLI, Metodo.CASHEA}
+    METODOS_CON_REFERENCIA = {Metodo.PAGO_MOVIL, Metodo.TARJETA, Metodo.BINANCE, Metodo.ZINLI, Metodo.CASHEA}
     METODOS_DIGITALES = (Metodo.PAGO_MOVIL, Metodo.BINANCE, Metodo.ZINLI)  # el cliente paga desde su teléfono
 
     factura = models.ForeignKey(Factura, on_delete=models.PROTECT, related_name="pagos")
@@ -622,7 +629,10 @@ class Pago(models.Model):
             raise ValidationError("Ingresa un monto mayor a cero.")
         if self.factura.saldo_local <= 0:
             raise ValidationError("La factura no tiene saldo pendiente.")
-        # La referencia o el voucher se guardan si se escriben, pero no son obligatorios.
+        # La referencia o el voucher se guardan si se escriben, pero no son obligatorios… salvo en Cashea:
+        # el número de orden es lo que permite cuadrar lo que Cashea paga cada miércoles.
+        if self.metodo == self.Metodo.CASHEA and len((self.referencia or "").strip()) < 3:
+            raise ValidationError("Escribe el número de orden del financiamiento.")
         if self.metodo in self.METODOS_CON_REFERENCIA:
             if self._calcular()[3] > 0:
                 raise ValidationError("El monto excede el saldo; con este método no se entrega vuelto.")
@@ -668,6 +678,8 @@ class Propina(models.Model):
     @classmethod
     @transaction.atomic
     def registrar(cls, factura: "Factura", *, metodo: str, monto: Decimal, usuario) -> "Propina":
+        if metodo == Pago.Metodo.CASHEA:
+            raise ValidationError("La propina no se puede financiar.")
         if metodo not in Pago.Metodo.values:
             raise ValidationError("Método de la propina no válido.")
         if monto is None or not monto.is_finite() or monto <= 0 or monto >= Decimal("1000000"):
@@ -844,6 +856,9 @@ class CierreCaja(models.Model):
             "vuelto_local": dec(d.get("vuelto_local")),
             "efectivo_bs_neto": dec(d.get("efectivo_bs_neto")),
             "divisas_usd": dec(d.get("divisas_usd")),
+            "financiado_local": dec(d.get("financiado_local")),
+            "financiado_usd": dec(d.get("financiado_usd")),
+            "recibido_local": self.total_local - dec(d.get("financiado_local")),
             "descuentos_local": dec(d.get("descuentos_local")),
             "propinas_local": dec(d.get("propinas_local")),
             "iva_local": dec(d.get("iva_local")),
@@ -900,6 +915,7 @@ class CierreCaja(models.Model):
         igtf_total = igtf_devuelto = Decimal("0.00")
         efectivo_bs = Decimal("0.00")
         divisas_usd = Decimal("0.00")
+        financiado_local = financiado_usd = Decimal("0.00")
         devuelto_total_local = Decimal("0.00")
         cantidad_pagos = 0
         for pago in pagos:
@@ -917,6 +933,9 @@ class CierreCaja(models.Model):
                 efectivo_bs += pago.monto_recibido
             elif pago.metodo == Pago.Metodo.DIVISA:
                 divisas_usd += pago.monto_recibido
+            elif pago.metodo == Pago.Metodo.CASHEA:
+                financiado_local += pago.monto_local
+                financiado_usd += pago.monto_recibido
 
         cantidad_devoluciones = 0
         for dev in devoluciones:
@@ -932,6 +951,9 @@ class CierreCaja(models.Model):
                 efectivo_bs -= dev.monto
             elif dev.metodo == Pago.Metodo.DIVISA:
                 divisas_usd -= dev.monto
+            elif dev.metodo == Pago.Metodo.CASHEA:
+                financiado_local -= dev.monto_local
+                financiado_usd -= dev.monto
 
         lineas = sorted(acumulado.values(), key=lambda x: x["metodo_label"])
         facturas = [_foto_factura(f) for f in facturas.order_by("pagada_en")]
@@ -967,6 +989,9 @@ class CierreCaja(models.Model):
             "vuelto_local": vuelto_total,
             "efectivo_bs_neto": efectivo_bs - vuelto_total,
             "divisas_usd": divisas_usd,
+            "financiado_local": financiado_local,
+            "financiado_usd": financiado_usd,
+            "recibido_local": total_local - financiado_local,
             "descuentos_local": sum((f["descuento_local"] for f in facturas if f["estado"] != Factura.Estado.ANULADA), Decimal("0.00")),
             "propinas": propinas_lineas,
             "propinas_local": sum((x["monto_local"] for x in propinas_lineas), Decimal("0.00")),
@@ -1011,6 +1036,8 @@ class CierreCaja(models.Model):
                         "vuelto_local": str(datos["vuelto_local"]),
                         "efectivo_bs_neto": str(datos["efectivo_bs_neto"]),
                         "divisas_usd": str(datos["divisas_usd"]),
+                        "financiado_local": str(datos["financiado_local"]),
+                        "financiado_usd": str(datos["financiado_usd"]),
                         "cantidad_pagos": datos["cantidad_pagos"],
                         "cantidad_devoluciones": datos["cantidad_devoluciones"],
                         "devuelto_local": str(datos["devuelto_local"]),
@@ -1236,3 +1263,122 @@ def datos_cliente_validos(crudos) -> tuple[dict | None, str]:
     limpio["nombre"], limpio["direccion"] = limpio["nombre"][:120], limpio["direccion"][:200]
     limpio["telefono"], limpio["correo"] = limpio["telefono"][:20], limpio["correo"][:254]
     return limpio, ""
+
+
+# ---- Cashea: ventas financiadas ---------------------------------------------------------------
+def miercoles_de_pago(fecha):
+    """Cashea paga cada miércoles lo financiado en la semana anterior (lunes a domingo)."""
+    from datetime import timedelta
+
+    lunes = fecha - timedelta(days=fecha.weekday())
+    return lunes + timedelta(days=9)
+
+
+class LiquidacionCashea(models.Model):
+    """Pago que Cashea le hace al local un miércoles por las ventas financiadas de la semana anterior."""
+
+    fecha = models.DateField(help_text="Día en que llegó el dinero.")
+    moneda = models.CharField(max_length=3, choices=Pago.Moneda.choices, default=Pago.Moneda.USD)
+    monto_recibido = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
+    tasa_cambio = models.DecimalField(max_digits=14, decimal_places=4, help_text="Tasa usada si llegó en bolívares.")
+    monto_recibido_usd = models.DecimalField(max_digits=12, decimal_places=2)
+    monto_esperado_usd = models.DecimalField(max_digits=12, decimal_places=2)
+    referencia = models.CharField(max_length=60, blank=True)
+    nota = models.CharField(max_length=200, blank=True)
+    registrada_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    registrada_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "pago de Cashea"
+        verbose_name_plural = "pagos de Cashea"
+        ordering = ["-fecha", "-id"]
+
+    def __str__(self) -> str:
+        return f"Cashea {self.fecha} · ${self.monto_recibido_usd}"
+
+    @property
+    def descuento_usd(self) -> Decimal:
+        """Lo que Cashea retuvo (comisión). Negativo si pagó de más."""
+        return self.monto_esperado_usd - self.monto_recibido_usd
+
+    @classmethod
+    @transaction.atomic
+    def registrar(cls, *, financiamientos, fecha, moneda: str, monto: Decimal, referencia: str, usuario,
+                  nota: str = "") -> "LiquidacionCashea":
+        ids = [f.pk for f in financiamientos]
+        pendientes = list(FinanciamientoCashea.objects.select_for_update().filter(
+            pk__in=ids, estado=FinanciamientoCashea.Estado.PENDIENTE))
+        if not pendientes or len(pendientes) != len(set(ids)):
+            raise ValidationError("Elige ventas financiadas que estén por cobrar (alguna ya se registró o se anuló).")
+        if moneda not in Pago.Moneda.values:
+            raise ValidationError("Moneda no válida.")
+        if monto is None or monto <= 0:
+            raise ValidationError("Escribe el monto que pagó Cashea.")
+        if fecha > timezone.localdate():
+            raise ValidationError("La fecha del pago no puede ser futura.")
+        esperado = sum((f.monto_usd for f in pendientes), Decimal("0.00"))
+        tasa = TasaCambio.vigente().valor
+        recibido_usd = monto if moneda == Pago.Moneda.USD else _redondear(monto / tasa)
+        if recibido_usd > esperado * Decimal("1.05") + Decimal("1"):
+            raise ValidationError(f"El monto supera lo financiado en esas ventas (${esperado}). Revisa la selección.")
+        liquidacion = cls.objects.create(
+            fecha=fecha, moneda=moneda, monto_recibido=monto, tasa_cambio=tasa, monto_recibido_usd=recibido_usd,
+            monto_esperado_usd=esperado, referencia=" ".join((referencia or "").split())[:60],
+            nota=" ".join((nota or "").split())[:200], registrada_por=usuario,
+        )
+        FinanciamientoCashea.objects.filter(pk__in=[f.pk for f in pendientes]).update(
+            estado=FinanciamientoCashea.Estado.COBRADO, liquidacion=liquidacion)
+        return liquidacion
+
+
+class FinanciamientoCashea(models.Model):
+    """Parte de una factura que financió Cashea: no entra a la caja el día de la venta, se cobra el miércoles."""
+
+    class Estado(models.TextChoices):
+        PENDIENTE = "PEN", "Por cobrar"
+        COBRADO = "COB", "Cobrado"
+        ANULADO = "ANU", "Anulado"
+
+    factura = models.ForeignKey(Factura, on_delete=models.PROTECT, related_name="financiamientos")
+    pago = models.OneToOneField(Pago, on_delete=models.PROTECT, related_name="financiamiento")
+    orden = models.CharField(max_length=60, help_text="Número de orden de Cashea.")
+    monto_usd = models.DecimalField(max_digits=12, decimal_places=2)
+    monto_local = models.DecimalField(max_digits=12, decimal_places=2)
+    fecha_venta = models.DateField()
+    fecha_pago = models.DateField(help_text="Miércoles en que Cashea debe pagarlo.")
+    estado = models.CharField(max_length=3, choices=Estado.choices, default=Estado.PENDIENTE)
+    liquidacion = models.ForeignKey(
+        LiquidacionCashea, on_delete=models.PROTECT, null=True, blank=True, related_name="financiamientos"
+    )
+    anulado_en = models.DateTimeField(null=True, blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "venta financiada (Cashea)"
+        verbose_name_plural = "ventas financiadas (Cashea)"
+        ordering = ["fecha_pago", "fecha_venta", "id"]
+        indexes = [models.Index(fields=["estado", "fecha_pago"])]
+
+    def __str__(self) -> str:
+        return f"Cashea {self.orden} · ${self.monto_usd}"
+
+    @classmethod
+    def desde_pago(cls, pago: Pago) -> "FinanciamientoCashea":
+        fecha = timezone.localdate(pago.registrado_en)
+        return cls.objects.create(
+            factura=pago.factura, pago=pago, orden=pago.referencia, monto_usd=pago.monto_recibido,
+            monto_local=pago.monto_local, fecha_venta=fecha, fecha_pago=miercoles_de_pago(fecha),
+        )
+
+    @property
+    def atrasado(self) -> bool:
+        return self.estado == self.Estado.PENDIENTE and self.fecha_pago < timezone.localdate()
+
+    @property
+    def por_devolver(self) -> bool:
+        """Venta anulada después de que Cashea ya la pagó: ese dinero se le debe devolver a Cashea."""
+        return self.estado == self.Estado.ANULADO and self.liquidacion_id is not None
+
+    def anular(self) -> None:
+        self.estado, self.anulado_en = self.Estado.ANULADO, timezone.now()
+        self.save(update_fields=["estado", "anulado_en"])

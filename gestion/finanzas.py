@@ -108,14 +108,29 @@ def gastos_del_mes(anio: int, mes: int) -> dict:
     }
 
 
+def cashea_del_mes(anio: int, mes: int) -> dict:
+    """Lo que Cashea retuvo (comisión) en los pagos que llegaron en el mes, y lo que aún debe hoy."""
+    from caja.models import FinanciamientoCashea, LiquidacionCashea
+
+    inicio, fin, _, _ = rango_mes(anio, mes)
+    comision = CERO
+    for l in LiquidacionCashea.objects.filter(fecha__gte=inicio, fecha__lte=fin):
+        comision += l.monto_esperado_usd - l.monto_recibido_usd
+    pendiente = FinanciamientoCashea.objects.filter(estado=FinanciamientoCashea.Estado.PENDIENTE).aggregate(
+        v=Sum("monto_usd"))["v"]
+    return {"comision_cashea": _usd(comision), "cashea_por_cobrar": _usd(pendiente)}
+
+
 def resultado_mes(anio: int, mes: int) -> dict:
     """Estado de resultados del mes: de las ventas a la ganancia neta."""
     _, _, desde, hasta = rango_mes(anio, mes)
     datos = ventas_y_costos(desde, hasta)
     gastos = gastos_del_mes(anio, mes)
-    neta = datos["ganancia_bruta"] - datos["mermas"] - gastos["total_fijos"] - gastos["total_extraordinarios"]
+    cashea = cashea_del_mes(anio, mes)
+    neta = (datos["ganancia_bruta"] - datos["mermas"] - gastos["total_fijos"] - gastos["total_extraordinarios"]
+            - cashea["comision_cashea"])
     return {
-        **datos, **gastos, "ganancia_neta": neta,
+        **datos, **gastos, **cashea, "ganancia_neta": neta,
         "margen_neto": int(round(neta / datos["ventas"] * 100)) if datos["ventas"] else None,
     }
 

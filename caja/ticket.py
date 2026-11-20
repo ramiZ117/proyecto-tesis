@@ -23,6 +23,7 @@ NOMBRE_METODO = {
     "TAR": "TARJETA",
     "BIN": "BINANCE",
     "ZIN": "ZINLI",
+    "CAS": "FINANCIADO",
 }
 
 
@@ -116,7 +117,7 @@ def ticket_factura(factura, detalles=None) -> str:
             nombre += f" {usd(p.monto_recibido)}"
         lineas.append(par(nombre, bs(p.monto_local)))
         if p.referencia:
-            lineas.append(f"  Ref. {p.referencia}")
+            lineas.append(f"  {'Orden' if p.metodo == 'CAS' else 'Ref.'} {p.referencia}")
         if p.vuelto_local and p.vuelto_local > 0:
             lineas.append(par("  VUELTO", bs(p.vuelto_local)))
         if p.igtf_local:
@@ -168,6 +169,10 @@ def ticket_cierre(cierre, datos=None) -> str:
     lineas.append(LINEA)
     lineas.append(par("TOTAL COBRADO", bs(datos["total_local"])))
     lineas.append(par("REF. EN DOLARES", usd(datos["total_usd"])))
+    if datos.get("financiado_local"):
+        lineas.append(par("Financiado", "-" + bs(datos["financiado_local"])))
+        lineas.append(par("  (por cobrar el miercoles)", usd(datos["financiado_usd"])))
+        lineas.append(par("RECIBIDO EN CAJA", bs(datos["recibido_local"])))
     lineas.append(LINEA)
 
     lineas += centro("DEBE HABER EN CAJA")

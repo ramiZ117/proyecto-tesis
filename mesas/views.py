@@ -14,10 +14,13 @@ from mesas.models import DetallePedido, Mesa, Pedido, SolicitudCliente
 
 
 def _atiende(request, pedido: Pedido) -> bool:
-    """Un mesero gestiona sus pedidos; la caja, los pedidos para llevar; el administrador, todos."""
+    """Un mesero gestiona sus pedidos; la caja, los de las mesas y los para llevar; el administrador, todos.
+
+    Cuando la caja edita la comanda de una mesa, el pedido sigue a nombre del mesero que la atiende.
+    """
     if es_admin(request.user) or pedido.mesero_id == request.user.id:
         return True
-    return pedido.es_para_llevar and not pedido.en_linea and en_grupo(request.user, GRUPO_CAJA)
+    return not pedido.en_linea and en_grupo(request.user, GRUPO_CAJA)
 
 
 def _es_caja_solo(user) -> bool:
@@ -26,8 +29,10 @@ def _es_caja_solo(user) -> bool:
     return not es_admin(user) and GRUPO_MESERO not in grupos and GRUPO_CAJA in grupos
 
 
-def _inicio(request):
-    return redirect("caja:llevar") if _es_caja_solo(request.user) else redirect("mesas:mapa")
+def _inicio(request, pedido: Pedido | None = None):
+    if _es_caja_solo(request.user):
+        return redirect("caja:mesas" if pedido is not None and pedido.mesa_id else "caja:llevar")
+    return redirect("mesas:mapa")
 
 
 def _pedido_propio(request, pedido_id: int):
@@ -36,7 +41,7 @@ def _pedido_propio(request, pedido_id: int):
     if not _atiende(request, pedido):
         quien = f"La {pedido.mesa}" if pedido.mesa_id else f"El pedido {pedido.etiqueta}"
         messages.error(request, f"{quien} la atiende {pedido.mesero.username}.")
-        return pedido, _inicio(request)
+        return pedido, _inicio(request, pedido)
     return pedido, None
 
 
@@ -198,13 +203,34 @@ def comanda(request, pedido_id):
             "detalles": detalles,
             "subtotal_usd": _a_usd(pedido.subtotal),
             "mesas_libres": [m for m in contexto["mesas"] if m.estado == Mesa.Estado.DISPONIBLE and not m.pedido_info],
-            "volver_url": reverse("caja:llevar") if _es_caja_solo(request.user) else reverse("mesas:mapa"),
-            "volver_texto": "Pedidos para llevar" if _es_caja_solo(request.user) else "Volver al mapa",
+            "volver_url": reverse("mesas:mapa"),
+            "volver_texto": "Volver al mapa",
         }
     )
     if _es_caja_solo(request.user):
-        return render(request, "caja/llevar.html", contexto)
+        if pedido.es_para_llevar:
+            contexto.update(volver_url=reverse("caja:llevar"), volver_texto="Pedidos para llevar", seccion_caja="llevar")
+            return render(request, "caja/llevar.html", contexto)
+        contexto.update(volver_url=reverse("caja:mesas"), volver_texto="Mesas en servicio", seccion_caja="mesas",
+                        mesas_caja=mesas_en_servicio())
+        return render(request, "caja/mesas.html", contexto)
     return render(request, "mesas/salon.html", contexto)
+
+
+def mesas_en_servicio():
+    """Comandas abiertas de las mesas (para la pantalla de caja)."""
+    return list(
+        Pedido.objects.filter(tipo=Pedido.Tipo.MESA)
+        .exclude(estado__in=[Pedido.Estado.CERRADO, Pedido.Estado.ANULADO])
+        .select_related("mesa", "mesero")
+        .prefetch_related(
+            Prefetch(
+                "detalles",
+                queryset=DetallePedido.objects.exclude(estado=DetallePedido.Estado.ANULADO).select_related("producto"),
+            )
+        )
+        .order_by("mesa__numero")
+    )
 
 
 def _a_usd(monto_local):
@@ -391,7 +417,7 @@ def anular_pedido(request, pedido_id):
     except ValidationError as exc:
         messages.error(request, texto_validacion(exc))
         return _volver(pedido)
-    return _inicio(request)
+    return _inicio(request, pedido)
 
 
 @requiere_grupo(GRUPO_MESERO, GRUPO_CAJA)

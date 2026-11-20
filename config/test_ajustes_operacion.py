@@ -194,7 +194,7 @@ class MenuTests(DatosBase):
         self.assertNotContains(r, "return confirm(")
 
     def test_las_tablas_de_inventario_se_paginan(self):
-        self.assertContains(self.cliente(self.cajero).get("/inventario/"), 'data-paginar="insumos"')
+        self.assertContains(self.cliente(self.admin).get("/inventario/"), 'data-paginar="insumos"')
         self.assertContains(self.cliente(self.admin).get("/gestion/insumos/"), 'data-paginar="insumos-admin"')
 
 

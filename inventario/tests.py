@@ -139,7 +139,7 @@ class AlertasDeStockTests(DatosBase):
         self.pedido(items=[(self.bistec, 17)])  # reserva 8.5 kg de 10: quedan 1.5 (mínimo 2)
         self.res.refresh_from_db()
         self.assertEqual(self.res.stock_actual, Decimal("10.000"))
-        r = self.cliente(self.cajero).get("/inventario/")
+        r = self.cliente(self.admin).get("/inventario/")
         self.assertContains(r, "Stock crítico")
         res = next(i for i in r.context["insumos"] if i.pk == self.res.pk)
         self.assertEqual((res.comprometido, res.disponible, res.critico), (Decimal("8.500"), Decimal("1.500"), True))
@@ -156,7 +156,7 @@ class AlertasDeStockTests(DatosBase):
 
     def test_inventario_resalta_los_criticos_primero(self):
         Insumo.objects.filter(pk=self.pan.pk).update(stock_actual=Decimal("0.5"))
-        r = self.cliente(self.cajero).get("/inventario/")
+        r = self.cliente(self.admin).get("/inventario/")
         self.assertContains(r, ">Crítico<")
         self.assertEqual(r.context["insumos"][0].pk, self.pan.pk)
 
@@ -182,7 +182,7 @@ class DisponibilidadYReposicionTests(DatosBase):
         self.assertEqual(pedido.detalles.count(), 1)
 
     def test_reposicion_suma_stock_y_registra_la_entrada(self):
-        r = self.cliente(self.cajero).post(
+        r = self.cliente(self.admin).post(
             "/inventario/entrada/", {"insumo_id": self.pan.pk, "cantidad": "20", "nota": "Proveedor A"}
         )
         self.assertEqual(r.status_code, 302)
@@ -192,7 +192,7 @@ class DisponibilidadYReposicionTests(DatosBase):
         self.assertEqual((mov.tipo, mov.cantidad, mov.stock_resultante), ("ENT", Decimal("20"), Decimal("25.000")))
 
     def test_reposicion_rechaza_cantidades_invalidas(self):
-        self.cliente(self.cajero).post("/inventario/entrada/", {"insumo_id": self.pan.pk, "cantidad": "-3"})
+        self.cliente(self.admin).post("/inventario/entrada/", {"insumo_id": self.pan.pk, "cantidad": "-3"})
         self.pan.refresh_from_db()
         self.assertEqual(self.pan.stock_actual, Decimal("5.000"))
 

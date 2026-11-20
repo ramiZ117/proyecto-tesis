@@ -25,6 +25,11 @@
         {% include "gestion/_campo.html" with campo=form.zinli_correo %}
       </div>
     </section>
+    <section class="card subir d1 pila" style="gap: 4px">
+      <h2 style="margin:0">Cashea</h2>
+      <p class="obs" style="margin:0 0 6px">En el cobro aparece «Cashea» para registrar la parte financiada (con el número de orden). Lo financiado no cuenta como dinero recibido: queda en «Cashea por cobrar» hasta que Cashea pague el miércoles.</p>
+      <div class="interruptores">{% include "gestion/_campo.html" with campo=form.cashea_activo %}</div>
+    </section>
     <section class="card subir d2 pila" style="gap: 4px">
       <h2 style="margin:0">Pedidos para retirar</h2>
       <p class="obs" style="margin:0 0 6px">Quien abre el menú con el enlace general (no el QR de una mesa) puede pedir, pagar por pago móvil, Binance o Zinli y subir el comprobante. Caja lo verifica en «Pedidos en línea».</p>

@@ -249,7 +249,7 @@ class InventarioAmpliadoTests(DatosBase):
         self.assertNotIn(self.agua.pk, filas)  # sin receta no hay costo
 
     def test_pantalla_registra_merma_y_valida(self):
-        c = self.cliente(self.cajero)
+        c = self.cliente(self.admin)
         r = c.post("/inventario/movimiento/", {"tipo": "MER", "insumo_id": self.res.pk, "cantidad": "1,5", "motivo": "DAN"}, follow=True)
         self.assertContains(r, "Merma registrada")
         for datos, texto in (
@@ -264,9 +264,8 @@ class InventarioAmpliadoTests(DatosBase):
         self.assertEqual(self.res.stock_actual, Decimal("8.500"))
 
     def test_solo_el_admin_ajusta_por_conteo(self):
-        r = self.cliente(self.cajero).post("/inventario/movimiento/", {"tipo": "AJU", "insumo_id": self.res.pk, "cantidad": "3"}, follow=True)
-        self.assertContains(r, "Solo un administrador")
-        self.assertNotContains(r, 'data-tipo-mov="AJU"')
+        r = self.cliente(self.cajero).post("/inventario/movimiento/", {"tipo": "AJU", "insumo_id": self.res.pk, "cantidad": "3"})
+        self.assertEqual(r.status_code, 403)  # el inventario es solo del administrador
         self.res.refresh_from_db()
         self.assertEqual(self.res.stock_actual, Decimal("10.000"))
         r = self.cliente(self.admin).post("/inventario/movimiento/", {"tipo": "AJU", "insumo_id": self.res.pk, "cantidad": "3"}, follow=True)
@@ -275,7 +274,7 @@ class InventarioAmpliadoTests(DatosBase):
 
     def test_pantalla_muestra_resumen_lista_y_margenes(self):
         Insumo.objects.filter(pk=self.res.pk).update(stock_actual=Decimal("3.5"))
-        r = self.cliente(self.cajero).get("/inventario/")
+        r = self.cliente(self.admin).get("/inventario/")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.context["por_reponer"], 1)
         self.assertContains(r, "Lista de compra")
@@ -284,7 +283,7 @@ class InventarioAmpliadoTests(DatosBase):
 
     def test_exportar_lista_de_compra(self):
         Insumo.objects.filter(pk=self.res.pk).update(stock_actual=Decimal("3.5"))
-        r = self.cliente(self.cajero).get("/inventario/compra.csv")
+        r = self.cliente(self.admin).get("/inventario/compra.csv")
         texto = r.content.decode("utf-8-sig")
         self.assertTrue(r["Content-Type"].startswith("text/csv"))
         self.assertIn("Carnicería Al Sham;Res;16.5;kg;99.00", texto)

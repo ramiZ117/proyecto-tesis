@@ -172,12 +172,14 @@ class CajaParaLlevarTests(DatosBase):
         self.assertEqual(pedido.estado, Pedido.Estado.CERRADO)
         self.assertNotContains(self.cliente(self.chef).get("/cocina/"), "Luis")
 
-    def test_la_caja_no_maneja_las_mesas(self):
+    def test_la_caja_edita_las_mesas_sin_quitar_al_mesero(self):
         pedido = self.pedido(mesa=self.mesa2, items=[(self.agua, 1)])
         caja = self.cliente(self.cajero)
         caja.post(f"/mesas/comanda/{pedido.pk}/agregar/", {"producto_id": self.bistec.pk, "cantidad": "1"})
-        self.assertFalse(pedido.detalles.filter(producto=self.bistec).exists())
-        self.assertEqual(caja.get("/mesas/").status_code, 403)
+        self.assertTrue(pedido.detalles.filter(producto=self.bistec).exists())
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.mesero, self.mesero)
+        self.assertEqual(caja.get("/mesas/").status_code, 403)  # el mapa del salón sigue siendo del mesero
 
     def test_el_mesero_sigue_creando_pedidos_para_llevar(self):
         self.cliente(self.mesero).post("/mesas/llevar/nuevo/", {"cliente": "Ana"})

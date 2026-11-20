@@ -15,11 +15,12 @@ from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
 from caja.correo import cierre_en_segundo_plano, destinos_cierre, enviar_cierre, enviar_en_segundo_plano, enviar_factura
-from caja.models import (CierreCaja, ClienteFiscal, Factura, Pago, Propina, SolicitudCuenta, TasaCambio,
-                         datos_cliente_validos)
+from caja.models import (CierreCaja, ClienteFiscal, FinanciamientoCashea, Factura, LiquidacionCashea, Pago,
+                         Propina, SolicitudCuenta, TasaCambio, datos_cliente_validos)
 from caja.ticket import ticket_cierre, ticket_factura
+from gestion.models import AjustesLocal
 from config.formato import num
-from config.permisos import GRUPO_CAJA, GRUPO_MESERO, en_grupo, es_admin, requiere_grupo, texto_validacion
+from config.permisos import GRUPO_CAJA, GRUPO_MESERO, en_grupo, es_admin, requiere_admin, requiere_grupo, texto_validacion
 from mesas.models import DetallePedido, Mesa, Pedido, PedidoEnLinea
 
 CENTAVO = Decimal("0.01")
@@ -170,6 +171,10 @@ def factura_detalle(request, factura_id):
         (Pago.Metodo.BINANCE, "Binance", "Dólares, con referencia"),
         (Pago.Metodo.ZINLI, "Zinli", "Dólares, con referencia"),
     ]
+    contexto["metodos_propina"] = list(contexto["metodos"])
+    contexto["cashea_activo"] = AjustesLocal.actual().cashea_activo
+    if contexto["cashea_activo"]:
+        contexto["metodos"].append((Pago.Metodo.CASHEA, "Financiado", "Lo financiado, en $, con n.º de orden"))
     contexto["cuenta_cliente"] = SolicitudCuenta.activa_de(factura.pedido)
     contexto["detalles_vigentes"] = [d for d in factura.pedido.detalles.all() if d.estado != DetallePedido.Estado.ANULADO]
     contexto["ticket"] = ticket_factura(factura, contexto["detalles_vigentes"])
@@ -196,6 +201,11 @@ def registrar_pago(request, factura_id):
             return redirect("caja:factura", factura_id=factura.pk)
         pagos.append({"metodo": metodo, "monto": monto, "referencia": (referencias[n] if n < len(referencias) else "").strip()[:60]})
 
+    if any(p["metodo"] == Pago.Metodo.CASHEA for p in pagos) and not AjustesLocal.actual().cashea_activo:
+        messages.error(request, "Las ventas financiadas no están activas en «Cobros y delivery».")
+        return redirect("caja:factura", factura_id=factura.pk)
+    if pagos and all(p["metodo"] == Pago.Metodo.CASHEA for p in pagos) and factura.saldo_local == factura.total_local:
+        messages.warning(request, "Ojo: se registró todo como financiado, sin inicial.")
     propina_texto = (request.POST.get("propina_monto") or "").strip()
     propina = _leer_monto(propina_texto) if propina_texto else None
     if propina_texto and propina is None:
@@ -709,7 +719,7 @@ def llevar(request):
     pedidos = _para_llevar()
     for p in pedidos:
         p.factura_vigente = p.factura_activa
-    return render(request, "caja/llevar.html", {"llevar": pedidos})
+    return render(request, "caja/llevar.html", {"llevar": pedidos, "seccion_caja": "llevar"})
 
 
 # ---- clientes que piden factura con sus datos -------------------------------------------------
@@ -773,3 +783,85 @@ def cliente_editar(request, cliente_id):
         if error:
             messages.error(request, error)
     return render(request, "caja/cliente.html", {"cliente": cliente})
+
+
+# ---- Cashea: lo financiado que Cashea paga cada miércoles -------------------------------------
+def _por_semana(pendientes):
+    semanas = {}
+    for f in pendientes:
+        semana = semanas.setdefault(f.fecha_pago, {"fecha_pago": f.fecha_pago, "ventas": [], "usd": Decimal("0.00"),
+                                                   "local": Decimal("0.00")})
+        semana["ventas"].append(f)
+        semana["usd"] += f.monto_usd
+        semana["local"] += f.monto_local
+    hoy = timezone.localdate()
+    for s in semanas.values():
+        s["desde"] = s["fecha_pago"] - timedelta(days=9)
+        s["hasta"] = s["fecha_pago"] - timedelta(days=3)
+        s["estado"] = "atrasado" if s["fecha_pago"] < hoy else ("hoy" if s["fecha_pago"] == hoy else "proximo")
+    return sorted(semanas.values(), key=lambda s: s["fecha_pago"])
+
+
+@requiere_admin
+def cashea(request):
+    """Financiamiento actual: lo que Cashea le debe al local, agrupado por el miércoles en que lo paga."""
+    pendientes = list(FinanciamientoCashea.objects.filter(estado=FinanciamientoCashea.Estado.PENDIENTE)
+                      .select_related("factura__pedido__mesa"))
+    por_devolver = list(FinanciamientoCashea.objects.filter(estado=FinanciamientoCashea.Estado.ANULADO,
+                                                            liquidacion__isnull=False).select_related("factura"))
+    liquidaciones = list(LiquidacionCashea.objects.select_related("registrada_por")
+                         .annotate(ventas=Count("financiamientos"))[:20])
+    total_usd = sum((f.monto_usd for f in pendientes), Decimal("0.00"))
+    total_local = sum((f.monto_local for f in pendientes), Decimal("0.00"))
+    hoy = timezone.localdate()
+    return render(request, "caja/cashea.html", {
+        "semanas": _por_semana(pendientes),
+        "total_usd": total_usd, "total_local": total_local, "cantidad": len(pendientes),
+        "atrasado_usd": sum((f.monto_usd for f in pendientes if f.fecha_pago < hoy), Decimal("0.00")),
+        "por_devolver": por_devolver,
+        "liquidaciones": liquidaciones,
+        "cobrado_mes_usd": sum((l.monto_recibido_usd for l in liquidaciones
+                                if l.fecha.year == hoy.year and l.fecha.month == hoy.month), Decimal("0.00")),
+        "hoy": hoy,
+        "activo": AjustesLocal.actual().cashea_activo,
+    })
+
+
+@requiere_admin
+@require_POST
+def cashea_liquidar(request):
+    """Registra el pago que hizo Cashea por las ventas marcadas."""
+    ids = [i for i in request.POST.getlist("financiamiento") if i.isdigit()]
+    monto = _leer_monto(request.POST.get("monto"))
+    fecha = parse_date(request.POST.get("fecha") or "") if request.POST.get("fecha") else timezone.localdate()
+    if fecha is None:
+        messages.error(request, "La fecha no es válida.")
+        return redirect("caja:cashea")
+    if not ids:
+        messages.error(request, "Marca las ventas que cubre este pago de Cashea.")
+        return redirect("caja:cashea")
+    if monto is None:
+        messages.error(request, "Escribe el monto que pagó Cashea.")
+        return redirect("caja:cashea")
+    try:
+        liquidacion = LiquidacionCashea.registrar(
+            financiamientos=list(FinanciamientoCashea.objects.filter(pk__in=ids)), fecha=fecha,
+            moneda=request.POST.get("moneda") or Pago.Moneda.USD, monto=monto,
+            referencia=request.POST.get("referencia", ""), nota=request.POST.get("nota", ""), usuario=request.user,
+        )
+    except ValidationError as exc:
+        messages.error(request, texto_validacion(exc))
+        return redirect("caja:cashea")
+    texto = f"Pago de Cashea registrado: ${num(liquidacion.monto_recibido_usd, 2)} por {len(ids)} venta{'s' if len(ids) != 1 else ''}."
+    if liquidacion.descuento_usd > 0:
+        texto += f" Cashea retuvo ${num(liquidacion.descuento_usd, 2)} (comisión)."
+    messages.success(request, texto)
+    return redirect("caja:cashea")
+
+
+@requiere_grupo(GRUPO_CAJA)
+def mesas(request):
+    """La caja ve las comandas de las mesas y puede editarlas; siguen a nombre de su mesero."""
+    from mesas.views import mesas_en_servicio
+
+    return render(request, "caja/mesas.html", {"mesas_caja": mesas_en_servicio(), "seccion_caja": "mesas"})

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}{% if pedido %}{{ pedido.etiqueta }}{% else %}Mesas{% endif %}{% endblock %}
+{% block subtitle %}Comandas de las mesas: la caja puede revisarlas y editarlas; siguen a nombre de su mesero{% endblock %}
+{% block heading %}Mesas en servicio{% endblock %}
+{% block content %}
+<div class="salon{% if pedido %} con-comanda{% endif %}">
+  <section class="salon-mapa">
+    <section class="card subir" aria-label="Mesas en servicio">
+      <div class="card-cabecera"><h2 class="stack">{% include "_icono.html" with nombre="mesas" %} Comandas abiertas</h2></div>
+      {% if mesas_caja %}
+        <div class="llevar-grid">
+          {% for p in mesas_caja %}
+            <a class="llevar-item{% if p.estado == 'LIS' or p.estado == 'ENT' %} listo{% endif %}{% if pedido and pedido.pk == p.pk %} sel{% endif %}" href="{% url 'mesas:comanda' p.pk %}">
+              <span class="stack" style="justify-content: space-between"><strong>Mesa {{ p.mesa.numero }}</strong>
+                <span class="pill {% if p.estado == 'LIS' %}ok{% elif p.estado == 'ABI' %}warn{% else %}ocu{% endif %}">{% if p.mesa.estado == 'FAC' %}Pide cuenta{% else %}{{ p.get_estado_display }}{% endif %}</span></span>
+              <span class="obs">Atiende {{ p.mesero.username }}</span>
+              <span class="obs">{% for d in p.detalles.all %}{{ d.cantidad }} × {{ d.producto.nombre }}{% if not forloop.last %} · {% endif %}{% empty %}Sin platos todavía{% endfor %}</span>
+            </a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="vacio">No hay mesas en servicio. Las abre el mesero desde el salón.</p>
+      {% endif %}
+    </section>
+  </section>
+  <aside class="salon-panel subir d2" aria-label="Comanda">
+    {% if pedido %}
+      <p class="pill info" style="white-space: normal; margin: 0 0 10px">Atiende {{ pedido.mesero.username }}: los cambios quedan en su comanda.</p>
+      {% include "mesas/_comanda.html" %}
+    {% else %}
+      <div class="comanda"><div class="panel-vacio">
+        {% include "_icono.html" with nombre="mesas" grosor="1.5" %}
+        <h2 style="margin:0">Elige una mesa</h2>
+        <p style="margin:0">Revisa lo que pidió, agrega o quita platos, envía a cocina o emite la factura.</p>
+      </div></div>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

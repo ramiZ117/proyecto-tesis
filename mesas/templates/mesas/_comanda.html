@@ -16,7 +16,7 @@
       <p class="pill info" style="white-space: normal">La cuenta ya fue facturada ({{ facturado.numero }}). El pedido no admite cambios.</p>
     {% else %}
       <div class="stack">
-        {% if not pedido.es_para_llevar %}
+        {% if not pedido.es_para_llevar and es_mesero %}
           <details class="desplegable">
             <summary>{% include "_icono.html" with nombre="mover" %}Mover de mesa</summary>
             {% if mesas_libres %}
@@ -46,7 +46,7 @@
     {% endif %}
   </div>
 
-  {% if solicitud and not facturado %}
+  {% if solicitud and not facturado and es_mesero %}
     <section class="solicitud-cliente" aria-label="Solicitud del cliente">
       <div class="stack" style="justify-content: space-between">
         <strong class="stack" style="gap: 6px">{% include "_icono.html" with nombre="campana" grosor="2.4" %}{% if solicitud.es_solo_llamado %}La mesa te está llamando{% else %}Pedido hecho desde el menú{% endif %}</strong>
@@ -209,11 +209,19 @@
           {% include "_icono.html" with nombre="cocina" %}{% if hay_sin_enviar %}Enviar a cocina ({{ nuevos }}){% else %}Nada nuevo que enviar{% endif %}
         </button>
       </form>
-      {% if not pedido.es_para_llevar %}
+      {% if not pedido.es_para_llevar and es_mesero %}
         <form method="post" action="{% url 'mesas:cuenta' pedido.pk %}" style="flex: 1 1 140px; display: flex">
           {% csrf_token %}
           <button class="btn grande azul bloque" type="submit">Pedir cuenta</button>
         </form>
+      {% elif not pedido.es_para_llevar and es_cajero and detalles and not hay_sin_enviar %}
+        {% if facturado %}
+          <a class="btn grande azul bloque" href="{% url 'caja:factura' facturado.pk %}" style="flex: 1 1 140px">Ir a cobrar</a>
+        {% else %}
+          <form method="post" action="{% url 'caja:emitir' pedido.pk %}" style="flex: 1 1 140px; display: flex">
+            {% csrf_token %}<button class="btn grande azul bloque" type="submit">{% include "_icono.html" with nombre="caja" %}Emitir factura</button>
+          </form>
+        {% endif %}
       {% endif %}
     </div>
     {% if pedido.es_para_llevar %}

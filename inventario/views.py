@@ -9,7 +9,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from config.formato import num
-from config.permisos import GRUPO_CAJA, es_admin, requiere_grupo, texto_validacion
+from config.permisos import es_admin, requiere_admin, texto_validacion
 from inventario.models import Insumo, MovimientoStock, Producto
 from inventario.servicios import (
     costos_de_platos,
@@ -36,7 +36,7 @@ def _leer_cantidad(texto) -> Decimal | None:
     return valor
 
 
-@requiere_grupo(GRUPO_CAJA)
+@requiere_admin
 def stock(request):
     insumos = estado_insumos()
     insumos.sort(key=lambda i: (ORDEN_NIVEL[i.nivel], i.nombre))
@@ -82,7 +82,7 @@ def _volver(tipo: str = "", insumo_id: str = ""):
     return redirect(destino + ("?" + "&".join(params) if params else "") + "#movimiento")
 
 
-@requiere_grupo(GRUPO_CAJA)
+@requiere_admin
 @require_POST
 def movimiento(request):
     """Entrada (compra), merma o ajuste por conteo desde la pantalla de inventario."""
@@ -126,7 +126,7 @@ def movimiento(request):
     return _volver()
 
 
-@requiere_grupo(GRUPO_CAJA)
+@requiere_admin
 @require_POST
 def entrada(request):
     """Ruta histórica de la reposición: equivale a un movimiento de tipo Entrada."""
@@ -143,7 +143,7 @@ def entrada(request):
     return redirect("inventario:stock")
 
 
-@requiere_grupo(GRUPO_CAJA)
+@requiere_admin
 def compra_csv(request):
     """Lista de compra sugerida agrupada por proveedor, lista para enviar."""
     respuesta = HttpResponse(content_type="text/csv; charset=utf-8")
@@ -233,7 +233,7 @@ def _filtrar_movimientos(request):
     return consulta, filtros, error, usuarios
 
 
-@requiere_grupo(GRUPO_CAJA)
+@requiere_admin
 def movimientos(request):
     """Registro completo de lo que entra y sale del inventario, con filtros, totales y exportación."""
     from django.core.paginator import Paginator
@@ -287,7 +287,7 @@ def _celda(texto: str) -> str:
     return "'" + texto if texto[:1] in ("=", "+", "-", "@") else texto
 
 
-@requiere_grupo(GRUPO_CAJA)
+@requiere_admin
 def kardex(request, insumo_id):
     """Kárdex del insumo: existencia inicial, cada entrada y salida con su saldo, y existencia final."""
     from datetime import timedelta

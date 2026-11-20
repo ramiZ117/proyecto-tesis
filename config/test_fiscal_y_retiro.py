@@ -378,7 +378,8 @@ class MovimientosInventarioTests(_Base):
 
         registrar_entrada(self.res.pk, Decimal("2"), usuario=self.cajero, costo_unitario=Decimal("6"))
         registrar_merma(self.pan.pk, Decimal("1"), "DAN", nota="=HACK()", usuario=self.cajero)
-        c = self.cliente(self.cajero)
+        c = self.cliente(self.admin)
+        self.assertEqual(self.cliente(self.cajero).get("/inventario/movimientos/").status_code, 403)
         r = c.get("/inventario/movimientos/")
         self.assertEqual(r.context["total"], 2)
         self.assertContains(r, "Auditoría al día")
@@ -401,13 +402,13 @@ class MovimientosInventarioTests(_Base):
 
         registrar_entrada(self.res.pk, Decimal("4"), usuario=self.cajero)
         registrar_merma(self.res.pk, Decimal("1.5"), "VEN", usuario=self.cajero)
-        r = self.cliente(self.cajero).get(f"/inventario/insumo/{self.res.pk}/kardex/")
+        r = self.cliente(self.admin).get(f"/inventario/insumo/{self.res.pk}/kardex/")
         k = r.context["k"]
         self.assertEqual((k["inicial"], k["entradas"], k["salidas"], k["final"]),
                          (Decimal("10"), Decimal("4"), Decimal("1.5"), Decimal("12.5")))
         self.assertTrue(r.context["cuadra"])
         self.assertContains(r, "coincide con el stock registrado")
-        csv = self.cliente(self.cajero).get(f"/inventario/insumo/{self.res.pk}/kardex/?formato=csv").content.decode("utf-8")
+        csv = self.cliente(self.admin).get(f"/inventario/insumo/{self.res.pk}/kardex/?formato=csv").content.decode("utf-8")
         self.assertIn("Existencia inicial", csv)
 
     def test_la_auditoria_detecta_stock_cambiado_por_fuera(self):
@@ -424,5 +425,5 @@ class MovimientosInventarioTests(_Base):
         salida = StringIO()
         call_command("auditar_inventario", stdout=salida)
         self.assertIn("Res", salida.getvalue())
-        self.assertContains(self.cliente(self.cajero).get("/inventario/movimientos/"), "no cuadra")
-        self.assertFalse(self.cliente(self.cajero).get(f"/inventario/insumo/{self.res.pk}/kardex/").context["cuadra"])
+        self.assertContains(self.cliente(self.admin).get("/inventario/movimientos/"), "no cuadra")
+        self.assertFalse(self.cliente(self.admin).get(f"/inventario/insumo/{self.res.pk}/kardex/").context["cuadra"])

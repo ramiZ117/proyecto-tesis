@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% load humanize l10n %}
+{% block title %}Cashea por cobrar{% endblock %}
+{% block subtitle %}Ventas financiadas · Cashea paga cada miércoles lo de la semana anterior{% endblock %}
+{% block heading %}Cashea por cobrar{% endblock %}
+{% block content %}
+{% if not activo %}<p class="pill crit subir" style="white-space: normal; margin: 0 0 14px">Cashea está desactivado en «Cobros y delivery»: no aparece en el cobro, pero aquí sigues viendo lo pendiente.</p>{% endif %}
+<section class="grid-auto subir" style="--min: 200px; margin-bottom: 16px" aria-label="Resumen">
+  <article class="kpi oscuro"><small>Financiado por cobrar</small><strong>${{ total_usd|intcomma }}</strong><span>Bs {{ total_local|intcomma }} · {{ cantidad }} venta{{ cantidad|pluralize }}</span></article>
+  <article class="kpi"><small>Atrasado</small><strong class="{% if atrasado_usd %}baja{% endif %}">${{ atrasado_usd|intcomma }}</strong><span>Debió llegar un miércoles anterior</span></article>
+  <article class="kpi"><small>Cobrado este mes</small><strong>${{ cobrado_mes_usd|intcomma }}</strong><span>Pagos de Cashea registrados</span></article>
+</section>
+
+{% for s in semanas %}
+  <form class="card subir pila cashea-semana {{ s.estado }}" method="post" action="{% url 'caja:cashea_liquidar' %}" style="gap: 10px; margin-bottom: 16px">
+    {% csrf_token %}
+    <div class="stack" style="justify-content: space-between">
+      <div>
+        <h2 style="margin:0">Miércoles {{ s.fecha_pago|date:"d/m/Y" }}</h2>
+        <p class="obs" style="margin:0">Ventas del lunes {{ s.desde|date:"d/m" }} al domingo {{ s.hasta|date:"d/m" }}</p>
+      </div>
+      <div style="text-align: right">
+        {% if s.estado == "atrasado" %}<span class="pill crit">Atrasado</span>{% elif s.estado == "hoy" %}<span class="pill FAC">Llega hoy</span>{% else %}<span class="pill info">Próximo</span>{% endif %}
+        <div class="fuerte" style="font-size: 20px">${{ s.usd|intcomma }}</div>
+        <div class="obs">Bs {{ s.local|intcomma }}</div>
+      </div>
+    </div>
+    <div class="tabla-caja">
+      <table>
+        <thead><tr><th><span class="oculto">Incluir</span></th><th>Factura</th><th>Venta</th><th>Orden Cashea</th><th>Cliente</th><th class="der">Financiado</th></tr></thead>
+        <tbody>
+          {% for f in s.ventas %}
+            <tr>
+              <td><input type="checkbox" name="financiamiento" value="{{ f.pk }}" checked aria-label="Incluir la factura {{ f.factura.numero }}"></td>
+              <td><a href="{% url 'caja:factura' f.factura.pk %}">{{ f.factura.numero }}</a></td>
+              <td>{{ f.fecha_venta|date:"d/m/Y" }}</td>
+              <td class="num">{{ f.orden }}</td>
+              <td>{% if f.factura.personalizada %}{{ f.factura.cliente_nombre }}{% else %}{{ f.factura.pedido.etiqueta }}{% endif %}</td>
+              <td class="der num">${{ f.monto_usd|intcomma }}<div class="obs">Bs {{ f.monto_local|intcomma }}</div></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="filtros-mov">
+      <div><label for="fecha-{{ forloop.counter }}">Llegó el</label><input id="fecha-{{ forloop.counter }}" type="date" name="fecha" value="{{ hoy|date:'Y-m-d' }}" max="{{ hoy|date:'Y-m-d' }}" required></div>
+      <div><label for="moneda-{{ forloop.counter }}">Moneda</label>
+        <select id="moneda-{{ forloop.counter }}" name="moneda"><option value="USD">Dólares</option><option value="LOC">Bolívares</option></select></div>
+      <div><label for="monto-{{ forloop.counter }}">Monto recibido</label><input id="monto-{{ forloop.counter }}" name="monto" inputmode="decimal" value="{{ s.usd|unlocalize }}" required></div>
+      <div><label for="ref-{{ forloop.counter }}">Referencia <span class="obs">(opcional)</span></label><input id="ref-{{ forloop.counter }}" name="referencia" maxlength="60"></div>
+    </div>
+    <p class="hint" style="margin:0">Si Cashea pagó menos (comisión), escribe lo que llegó: la diferencia queda registrada como comisión y se resta en «Finanzas y gastos».</p>
+    <button class="btn" type="submit" style="align-self: flex-start">Registrar pago de Cashea</button>
+  </form>
+{% empty %}
+  <section class="card subir"><p class="vacio" style="margin:0">No hay ventas financiadas por cobrar. Cuando se cobre una factura con «Cashea», aparecerá aquí con el miércoles en que se recibe.</p></section>
+{% endfor %}
+
+{% if por_devolver %}
+  <section class="card subir" style="margin-bottom: 16px; border: 2px solid var(--rojo-tinta)">
+    <h2 style="margin-top:0">Por devolver a Cashea</h2>
+    <p class="obs" style="margin-top:0">Estas ventas se anularon después de que Cashea las pagó: ese dinero se le debe devolver o descontará del próximo pago.</p>
+    <ul>{% for f in por_devolver %}<li>{{ f.factura.numero }} · orden {{ f.orden }} · ${{ f.monto_usd|intcomma }}</li>{% endfor %}</ul>
+  </section>
+{% endif %}
+
+<section class="card subir">
+  <h2 style="margin-top:0">Pagos recibidos de Cashea</h2>
+  <div class="tabla-caja">
+    <table>
+      <thead><tr><th>Llegó</th><th class="der">Ventas</th><th class="der">Financiado</th><th class="der">Recibido</th><th class="der">Retenido</th><th>Referencia</th><th>Registró</th></tr></thead>
+      <tbody>
+        {% for l in liquidaciones %}
+          <tr>
+            <td>{{ l.fecha|date:"d/m/Y" }}</td>
+            <td class="der">{{ l.ventas }}</td>
+            <td class="der num">${{ l.monto_esperado_usd|intcomma }}</td>
+            <td class="der num">${{ l.monto_recibido_usd|intcomma }}{% if l.moneda == "LOC" %}<div class="obs">Bs {{ l.monto_recibido|intcomma }}</div>{% endif %}</td>
+            <td class="der num">${{ l.descuento_usd|intcomma }}</td>
+            <td>{{ l.referencia|default:"—" }}</td>
+            <td>{{ l.registrada_por.username }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" class="obs">Todavía no se ha registrado ningún pago de Cashea.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

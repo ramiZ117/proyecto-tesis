@@ -429,8 +429,8 @@
     return filas;
   }
 
-  var METODOS_USD = ["DIV", "BIN", "ZIN"];
-  var SIN_VUELTO = ["PMO", "TAR", "BIN", "ZIN"];
+  var METODOS_USD = ["DIV", "BIN", "ZIN", "CAS"];
+  var SIN_VUELTO = ["PMO", "TAR", "BIN", "ZIN", "CAS"];
   function enDolares(m) { return METODOS_USD.indexOf(m) >= 0; }
 
   /* Simula lo que hará el servidor: primero los métodos sin vuelto y al final efectivo y divisa. */
@@ -495,7 +495,14 @@
     var caja = form.querySelector(".calculo");
     if (caja) caja.classList.toggle("error", !!r.error);
     var ref = form.querySelector("[data-referencia]");
-    if (ref) ref.hidden = !(metodo === "PMO" || metodo === "TAR" || metodo === "BIN" || metodo === "ZIN");
+    if (ref) {
+      ref.hidden = !(metodo === "PMO" || metodo === "TAR" || metodo === "BIN" || metodo === "ZIN" || metodo === "CAS");
+      var etiqueta = ref.querySelector("label");
+      var campo = ref.querySelector("input");
+      if (etiqueta && !etiqueta.hasAttribute("data-original")) etiqueta.setAttribute("data-original", etiqueta.innerHTML);
+      if (etiqueta) etiqueta.innerHTML = metodo === "CAS" ? "N.º de orden del financiamiento <span class=\"obs\">(obligatorio)</span>" : etiqueta.getAttribute("data-original");
+      if (campo) campo.required = metodo === "CAS";
+    }
     var enviar = form.querySelector("[data-cobrar]");
     if (enviar) {
       enviar.disabled = filas[0].monto <= 0 || !!r.error;

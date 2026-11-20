@@ -29,6 +29,10 @@ class AjustesLocal(models.Model):
         help_text="Lo que el cliente escribe en Binance para enviarte el pago.",
     )
     zinli_correo = models.EmailField("Correo de Zinli", blank=True)
+    cashea_activo = models.BooleanField(
+        "Aceptar Cashea en caja", default=True,
+        help_text="Ventas financiadas: el cliente paga la inicial y Cashea paga el resto al local cada miércoles.",
+    )
     retiro_activo = models.BooleanField(
         "Recibir pedidos para retirar desde el menú en línea", default=True,
         help_text="Solo con pago móvil, Binance o Zinli configurados: el cliente paga y sube el comprobante.",

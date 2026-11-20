@@ -17,7 +17,7 @@ from mesas.models import DetallePedido, Mesa, Pedido
 CENTAVO = Decimal("0.01")
 PERIODOS = {"hoy": "Hoy", "semana": "Semana", "mes": "Mes"}
 DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-COLORES_METODO = {"PMO": "#1B7F45", "DIV": "#E5B830", "EFE": "#2457C5", "TAR": "#B9A6EC", "BIN": "#C9A227", "ZIN": "#6C3FD1"}
+COLORES_METODO = {"PMO": "#1B7F45", "DIV": "#E5B830", "EFE": "#2457C5", "TAR": "#B9A6EC", "BIN": "#C9A227", "ZIN": "#6C3FD1", "CAS": "#E0457B"}
 
 
 def _inicio_dia(fecha):
